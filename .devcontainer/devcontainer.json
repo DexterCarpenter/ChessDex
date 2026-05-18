@@ -22,15 +22,12 @@
 				"mhutchie.git-graph"
 			]
 		}
-	}
+	},
+	// enter .venv if it doesn't exist, activate it, upgrade pip, and install dependencies
+	"postCreateCommand": "if [ ! -d .venv ]; then python3 -m venv .venv; fi && . .venv/bin/activate && python -m pip install --upgrade pip && python -m pip install -r requirements.txt"
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
-
-	// Uncomment the next line to run commands after the container is created.
-	// "postCreateCommand": "cat /etc/os-release",
-
-	
 
 	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "devcontainer"
