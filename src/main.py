@@ -7,3 +7,6 @@ TestBoard.setup_starting_position()
 
 print(TestBoard.render())
 
+TestBoard.place_piece(ChessPiece(Color.WHITE, Piece.QUEEN), "b5")
+
+print(TestBoard.render())

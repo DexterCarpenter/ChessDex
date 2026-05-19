@@ -24,7 +24,9 @@ class Piece(Enum):
     BISHOP   = auto()
     KNIGHT   = auto()
     PAWN     = auto()
-    NO_PIECE = auto()
+
+COLOR_LIST = list(Color) # A list of all colors for easy iteration when initializing the bitboards
+PIECE_LIST = list(Piece) # A list of all piece types for easy iteration when initializing the bitboards
 
 PIECE_SYMBOL = {
     (Color.WHITE, Piece.KING):   "♔",
@@ -49,12 +51,47 @@ SQUARE_SYMBOL = {
 
 @dataclass(slots=True)
 class ChessPiece:
+    """A lightweight value object describing a chess piece with its color and type."""
     color: Color
     name: Piece
 
     @property
     def symbol(self) -> str:
         return PIECE_SYMBOL[(self.color, self.name)]
+
+@dataclass(slots=True, init=False)
+class Sqr:
+    """A lightweight value object describing a chess square.
+
+    Supports initialization from either an algebraic square string or a bit index.
+    """
+    alg: str
+    idx: int
+    color: Color
+
+    def __init__(self, square: str | int):
+        if isinstance(square, int):
+            if not 0 <= square < 64:
+                raise IndexError(f"Bit index out of bounds: {square}")
+            self.idx = square
+            self.alg = idx2sqr(square)
+        else:
+            self.alg = square
+            self.idx = sqr2idx(square)
+
+        self.color = Color.WHITE if ((self.idx % 8) + (self.idx // 8)) % 2 == 0 else Color.BLACK
+
+    @property
+    def file(self) -> str:
+        return FILES[self.idx % 8]
+
+    @property
+    def rank(self) -> int:
+        return self.idx // 8 + 1
+
+    @property
+    def symbol(self) -> str:
+        return SQUARE_SYMBOL[self.color]
 
 class Move:
     """A lightweight value object describing a chess move.
@@ -73,22 +110,21 @@ class Move:
 
 
 
-class bbPiece(Enum):
-    """An enum to represent the type of a chess piece for bitboard representation."""
-    King     = auto()
-    Queen    = auto()
-    Rook     = auto()
-    Bishop   = auto()
-    Knight   = auto()
-    Pawn     = auto()
+# class bbPiece(Enum):
+#     """An enum to represent the type of a chess piece for bitboard representation."""
+#     King     = auto()
+#     Queen    = auto()
+#     Rook     = auto()
+#     Bishop   = auto()
+#     Knight   = auto()
+#     Pawn     = auto()
 
-class bbColor(Enum):
-    """An enum to represent the color of a chess piece for bitboard representation."""
-    White = auto()
-    Black = auto()
+# class bbColor(Enum):
+#     """An enum to represent the color of a chess piece for bitboard representation."""
+#     White = auto()
+#     Black = auto()
 
-PIECE_LIST = list(bbPiece) # A list of all piece types for easy iteration when initializing the bitboards
-COLOR_LIST = list(bbColor) # A list of all colors for easy iteration when initializing the bitboards
+
 
 @dataclass(slots=True)
 class Board:
@@ -97,7 +133,7 @@ class Board:
 
     Each piece type for both colors is represented by a separate 64-bit integer (bitboard).
     """
-    bitboards: dict[tuple[bbColor, bbPiece], mpz] = field(
+    bitboards: dict[tuple[Color, Piece], mpz] = field(
         default_factory=lambda: {
             (color, piece): mpz(0)
             for color in COLOR_LIST
@@ -115,29 +151,23 @@ class Board:
     # Basic piece operations
     # ------------------------
 
-    def place_piece(self, piece: str, square: str) -> None:
+    def place_piece(self, piece: ChessPiece, square: str) -> None:
         """Set the given piece bitboard at the given index to 1."""
         index = sqr2idx(square)
         if not 0 <= index < 64:
             raise IndexError(f"Bit index out of bounds: {index}")
 
-        if not hasattr(self, piece):
-            raise AttributeError(f"Unknown piece bitboard: {piece}")
-
-        value = getattr(self, piece)
-        setattr(self, piece, mpz(value | (mpz(1) << index)) & MASK_64)
+        value = getattr(self, piece.name)
+        setattr(self, piece.name, mpz(value | (mpz(1) << index)) & MASK_64)
     
-    def remove_piece(self, piece: str, square: str) -> None:
+    def remove_piece(self, piece: ChessPiece, square: str) -> None:
         """Set the given piece bitboard at the given index to 0."""
         index = sqr2idx(square)
         if not 0 <= index < 64:
             raise IndexError(f"Bit index out of bounds: {index}")
 
-        if not hasattr(self, piece):
-            raise AttributeError(f"Unknown piece bitboard: {piece}")
-
-        value = getattr(self, piece)
-        setattr(self, piece, mpz(value & ~(mpz(1) << index)) & MASK_64)
+        value = getattr(self, piece.name)
+        setattr(self, piece.name, mpz(value & ~(mpz(1) << index)) & MASK_64)
     
     def clear_pieces(self, piece: bbPiece) -> None:
         """Set all bits in the given piece bitboard to 0."""
@@ -302,6 +332,23 @@ def sqr2idx(square: str) -> int:
     rank_index = int(rank_char) - 1
 
     return rank_index * 8 + file_index
+
+
+def idx2sqr(index: int) -> str:
+    """Convert a bit index to algebraic square notation.
+
+    0 -> a1
+    1 -> b1
+    ...
+    63 -> h8
+    """
+    if not 0 <= index < 64:
+        raise IndexError("Bit index must be in range 0-63")
+
+    file_char = FILES[index % 8]
+    rank_char = RANKS[index // 8]
+    return f"{file_char}{rank_char}"
+
 
 def decomp_sqr(square: str) -> list[int, int]:
     """Decompose a square string into file and rank indies."""
