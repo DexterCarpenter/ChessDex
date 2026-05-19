@@ -78,7 +78,7 @@ class Sqr:
             self.alg = square
             self.idx = sqr2idx(square)
 
-        self.color = Color.WHITE if ((self.idx % 8) + (self.idx // 8)) % 2 == 0 else Color.BLACK
+        self.color = Color.BLACK if ((self.idx % 8) + (self.idx // 8)) % 2 == 0 else Color.WHITE
 
     @property
     def file(self) -> str:
@@ -257,7 +257,7 @@ class Board:
                 if index in square_symbols:
                     row_chars.append(square_symbols[index])
                 else:
-                    row_chars.append(SQUARE_SYMBOL[Color.WHITE] if (file_index + rank) % 2 == 0 else SQUARE_SYMBOL[Color.BLACK])
+                    row_chars.append(SQUARE_SYMBOL[Color.BLACK] if (file_index + rank) % 2 == 0 else SQUARE_SYMBOL[Color.WHITE])
             rows.append(space.join(row_chars))
 
         return "\n".join(rows)
