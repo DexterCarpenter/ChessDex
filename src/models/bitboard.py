@@ -45,8 +45,8 @@ PIECE_SYMBOL = {
 }
 
 SQUARE_SYMBOL = {
-    Color.WHITE: "◼",
-    Color.BLACK: "◻"
+    Color.WHITE: "◻",
+    Color.BLACK: "◼"
 }
 
 @dataclass(slots=True)
@@ -71,15 +71,14 @@ class Sqr:
 
     def __init__(self, square: str | int):
         if isinstance(square, int):
-            if not 0 <= square < 64:
-                raise IndexError(f"Bit index out of bounds: {square}")
+            valid_index(square)
             self.idx = square
             self.alg = idx2sqr(square)
         else:
             self.alg = square
             self.idx = sqr2idx(square)
 
-        self.color = Color.WHITE if ((self.idx % 8) + (self.idx // 8)) % 2 == 0 else Color.BLACK
+        self.color = Color.BLACK if ((self.idx % 8) + (self.idx // 8)) % 2 == 0 else Color.WHITE
 
     @property
     def file(self) -> str:
@@ -99,32 +98,10 @@ class Move:
     Stores both algebraic squares and computed bit indices for convenience.
     """
 
-    def __init__(self, from_sqr: str, to_sqr: str):
+    def __init__(self, from_sqr: Sqr, to_sqr: Sqr):
         # keep original square strings
         self.from_square = from_sqr
         self.to_square = to_sqr
-
-        # store indices for quick board operations
-        self.from_index = sqr2idx(from_sqr)
-        self.to_index = sqr2idx(to_sqr)
-
-
-
-# class bbPiece(Enum):
-#     """An enum to represent the type of a chess piece for bitboard representation."""
-#     King     = auto()
-#     Queen    = auto()
-#     Rook     = auto()
-#     Bishop   = auto()
-#     Knight   = auto()
-#     Pawn     = auto()
-
-# class bbColor(Enum):
-#     """An enum to represent the color of a chess piece for bitboard representation."""
-#     White = auto()
-#     Black = auto()
-
-
 
 @dataclass(slots=True)
 class Board:
@@ -151,59 +128,44 @@ class Board:
     # Basic piece operations
     # ------------------------
 
-    def place_piece(self, piece: ChessPiece, square: str) -> None:
+    def place_piece(self, piece: ChessPiece, square: Sqr) -> None:
         """Set the given piece bitboard at the given index to 1."""
-        index = sqr2idx(square)
-        if not 0 <= index < 64:
-            raise IndexError(f"Bit index out of bounds: {index}")
+        valid_index(square.idx)
 
-        value = getattr(self, piece.name)
-        setattr(self, piece.name, mpz(value | (mpz(1) << index)) & MASK_64)
+        key = (piece.color, piece.name)
+        value = self.bitboards[key]
+        self.bitboards[key] = mpz(value | (mpz(1) << square.idx)) & MASK_64
     
-    def remove_piece(self, piece: ChessPiece, square: str) -> None:
+    def remove_piece(self, piece: ChessPiece, square: Sqr) -> None:
         """Set the given piece bitboard at the given index to 0."""
-        index = sqr2idx(square)
-        if not 0 <= index < 64:
-            raise IndexError(f"Bit index out of bounds: {index}")
+        valid_index(square.idx)
 
-        value = getattr(self, piece.name)
-        setattr(self, piece.name, mpz(value & ~(mpz(1) << index)) & MASK_64)
-    
-    def clear_pieces(self, piece: bbPiece) -> None:
-        """Set all bits in the given piece bitboard to 0."""
-        for color in COLOR_LIST:
-            key = (color, piece)
-            if key in self.bitboards:
-                self.bitboards[key] = mpz(0)
+        key = (piece.color, piece.name)
+        value = self.bitboards[key]
+        self.bitboards[key] = mpz(value & ~(mpz(1) << square.idx)) & MASK_64
+
+    def clear_pieces(self, piece: ChessPiece) -> None:
+        """Set all bits in the given colored piece bitboard to 0."""
+        key = (piece.color, piece.name)
+        if key in self.bitboards:
+            self.bitboards[key] = mpz(0)
 
     def clear_board(self) -> None:
         """Set all bits in all piece bitboards to 0."""
         for key in self.bitboards:
-            self.clear_pieces(key)
+            self.bitboards[key] = mpz(0)
 
-    def get_piece_at(self, square: str) -> ChessPiece:
+    def get_piece_at(self, square: Sqr) -> ChessPiece | None:
         """Return the piece at the given square, or None if the square is empty."""
-        index = sqr2idx(square)
+        index = square.idx
 
-        for piece in [
-            ("whitePawns", Color.WHITE, Piece.PAWN),
-            ("whiteKnights", Color.WHITE, Piece.KNIGHT),
-            ("whiteBishops", Color.WHITE, Piece.BISHOP),
-            ("whiteRooks", Color.WHITE, Piece.ROOK),
-            ("whiteQueens", Color.WHITE, Piece.QUEEN),
-            ("whiteKing", Color.WHITE, Piece.KING),
-            ("blackPawns", Color.BLACK, Piece.PAWN),
-            ("blackKnights", Color.BLACK, Piece.KNIGHT),
-            ("blackBishops", Color.BLACK, Piece.BISHOP),
-            ("blackRooks", Color.BLACK, Piece.ROOK),
-            ("blackQueens", Color.BLACK, Piece.QUEEN),
-            ("blackKing", Color.BLACK, Piece.KING),
-        ]:
-            bitboard = getattr(self, piece[0])
-            if (bitboard >> index) & 1:
-                return ChessPiece(color=piece[1], name=piece[2])
+        for color in COLOR_LIST:
+            for piece in PIECE_LIST:
+                bitboard = self.bitboards[(color, piece)]
+                if (bitboard >> index) & 1:
+                    return ChessPiece(color=color, name=piece)
 
-        return ChessPiece(color=Color.WHITE, name=Piece.NO_PIECE)
+        return None
 
     # ------------------------
     # Board Initialization
@@ -213,18 +175,20 @@ class Board:
         """Set up the board with the standard starting position."""
         self.clear_board()
 
-        self.bitboards[(bbColor.White, bbPiece.Pawn)]   = mpz(0x000000000000FF00)
-        self.bitboards[(bbColor.White, bbPiece.Knight)] = mpz(0x0000000000000042)
-        self.bitboards[(bbColor.White, bbPiece.Bishop)] = mpz(0x0000000000000024)
-        self.bitboards[(bbColor.White, bbPiece.Rook)]   = mpz(0x0000000000000081)
-        self.bitboards[(bbColor.White, bbPiece.Queen)]  = mpz(0x0000000000000008)
-        self.bitboards[(bbColor.White, bbPiece.King)]   = mpz(0x0000000000000010)
-        self.bitboards[(bbColor.Black, bbPiece.Pawn)]   = mpz(0x00FF000000000000)
-        self.bitboards[(bbColor.Black, bbPiece.Knight)] = mpz(0x4200000000000000)
-        self.bitboards[(bbColor.Black, bbPiece.Bishop)] = mpz(0x2400000000000000)
-        self.bitboards[(bbColor.Black, bbPiece.Rook)]   = mpz(0x8100000000000000)
-        self.bitboards[(bbColor.Black, bbPiece.Queen)]  = mpz(0x0800000000000000)
-        self.bitboards[(bbColor.Black, bbPiece.King)]   = mpz(0x1000000000000000)
+        self.bitboards[(Color.WHITE, Piece.PAWN)]   = mpz(0x000000000000FF00)
+        self.bitboards[(Color.WHITE, Piece.KNIGHT)] = mpz(0x0000000000000042)
+        self.bitboards[(Color.WHITE, Piece.BISHOP)] = mpz(0x0000000000000024)
+        self.bitboards[(Color.WHITE, Piece.ROOK)]   = mpz(0x0000000000000081)
+        self.bitboards[(Color.WHITE, Piece.QUEEN)]  = mpz(0x0000000000000008)
+        self.bitboards[(Color.WHITE, Piece.KING)]   = mpz(0x0000000000000010)
+        self.bitboards[(Color.BLACK, Piece.PAWN)]   = mpz(0x00FF000000000000)
+        self.bitboards[(Color.BLACK, Piece.KNIGHT)] = mpz(0x4200000000000000)
+        self.bitboards[(Color.BLACK, Piece.BISHOP)] = mpz(0x2400000000000000)
+        self.bitboards[(Color.BLACK, Piece.ROOK)]   = mpz(0x8100000000000000)
+        self.bitboards[(Color.BLACK, Piece.QUEEN)]  = mpz(0x0800000000000000)
+        self.bitboards[(Color.BLACK, Piece.KING)]   = mpz(0x1000000000000000)
+
+        self.whiteTurn = True
     
     # ------------------------
     # Moves
@@ -232,18 +196,20 @@ class Board:
 
     def make_move(self, move: Move) -> None:
         """Make a move on the board. This is a very basic implementation that does not handle special moves or validation."""
-        # Determine which piece is being moved and update the bitboards accordingly
-        for piece in [
-            "whitePawns", "whiteKnights", "whiteBishops", "whiteRooks", "whiteQueens", "whiteKing",
-            "blackPawns", "blackKnights", "blackBishops", "blackRooks", "blackQueens", "blackKing"
-        ]:
-            value = getattr(self, piece)
-            if (value >> from_index) & 1:
-                # Move the piece
-                setattr(self, piece, mpz((value & ~(mpz(1) << from_index)) | (mpz(1) << to_index)) & MASK_64)
-                break
+        from_square = move.from_square
+        to_square = move.to_square
 
-        # Switch turn
+        moving_piece = self.get_piece_at(from_square)
+        if moving_piece is None:
+            raise ValueError(f"No piece to move from {from_square.alg}")
+
+        captured_piece = self.get_piece_at(to_square)
+        if captured_piece is not None:
+            self.remove_piece(captured_piece, to_square)
+
+        self.remove_piece(moving_piece, from_square)
+        self.place_piece(moving_piece, to_square)
+
         self.whiteTurn = not self.whiteTurn
 
     # ------------------------
@@ -257,18 +223,18 @@ class Board:
             ValueError: if multiple pieces occupy the same square.
         """
         piece_boards = [
-            (self.bitboards[(bbColor.White, bbPiece.Pawn)],   PIECE_SYMBOL[(Color.WHITE, Piece.PAWN)]),
-            (self.bitboards[(bbColor.White, bbPiece.Knight)], PIECE_SYMBOL[(Color.WHITE, Piece.KNIGHT)]),
-            (self.bitboards[(bbColor.White, bbPiece.Bishop)], PIECE_SYMBOL[(Color.WHITE, Piece.BISHOP)]),
-            (self.bitboards[(bbColor.White, bbPiece.Rook)],   PIECE_SYMBOL[(Color.WHITE, Piece.ROOK)]),
-            (self.bitboards[(bbColor.White, bbPiece.Queen)],  PIECE_SYMBOL[(Color.WHITE, Piece.QUEEN)]),
-            (self.bitboards[(bbColor.White, bbPiece.King)],   PIECE_SYMBOL[(Color.WHITE, Piece.KING)]),
-            (self.bitboards[(bbColor.Black, bbPiece.Pawn)],   PIECE_SYMBOL[(Color.BLACK, Piece.PAWN)]),
-            (self.bitboards[(bbColor.Black, bbPiece.Knight)], PIECE_SYMBOL[(Color.BLACK, Piece.KNIGHT)]),
-            (self.bitboards[(bbColor.Black, bbPiece.Bishop)], PIECE_SYMBOL[(Color.BLACK, Piece.BISHOP)]),
-            (self.bitboards[(bbColor.Black, bbPiece.Rook)],   PIECE_SYMBOL[(Color.BLACK, Piece.ROOK)]),
-            (self.bitboards[(bbColor.Black, bbPiece.Queen)],  PIECE_SYMBOL[(Color.BLACK, Piece.QUEEN)]),
-            (self.bitboards[(bbColor.Black, bbPiece.King)],   PIECE_SYMBOL[(Color.BLACK, Piece.KING)])
+            (self.bitboards[(Color.WHITE, Piece.PAWN)],   PIECE_SYMBOL[(Color.WHITE, Piece.PAWN)]),
+            (self.bitboards[(Color.WHITE, Piece.KNIGHT)], PIECE_SYMBOL[(Color.WHITE, Piece.KNIGHT)]),
+            (self.bitboards[(Color.WHITE, Piece.BISHOP)], PIECE_SYMBOL[(Color.WHITE, Piece.BISHOP)]),
+            (self.bitboards[(Color.WHITE, Piece.ROOK)],   PIECE_SYMBOL[(Color.WHITE, Piece.ROOK)]),
+            (self.bitboards[(Color.WHITE, Piece.QUEEN)],  PIECE_SYMBOL[(Color.WHITE, Piece.QUEEN)]),
+            (self.bitboards[(Color.WHITE, Piece.KING)],   PIECE_SYMBOL[(Color.WHITE, Piece.KING)]),
+            (self.bitboards[(Color.BLACK, Piece.PAWN)],   PIECE_SYMBOL[(Color.BLACK, Piece.PAWN)]),
+            (self.bitboards[(Color.BLACK, Piece.KNIGHT)], PIECE_SYMBOL[(Color.BLACK, Piece.KNIGHT)]),
+            (self.bitboards[(Color.BLACK, Piece.BISHOP)], PIECE_SYMBOL[(Color.BLACK, Piece.BISHOP)]),
+            (self.bitboards[(Color.BLACK, Piece.ROOK)],   PIECE_SYMBOL[(Color.BLACK, Piece.ROOK)]),
+            (self.bitboards[(Color.BLACK, Piece.QUEEN)],  PIECE_SYMBOL[(Color.BLACK, Piece.QUEEN)]),
+            (self.bitboards[(Color.BLACK, Piece.KING)],   PIECE_SYMBOL[(Color.BLACK, Piece.KING)])
         ]
 
         square_symbols: dict[int, str] = {}
@@ -291,7 +257,7 @@ class Board:
                 if index in square_symbols:
                     row_chars.append(square_symbols[index])
                 else:
-                    row_chars.append(SQUARE_SYMBOL[Color.WHITE] if (file_index + rank) % 2 == 0 else SQUARE_SYMBOL[Color.BLACK])
+                    row_chars.append(SQUARE_SYMBOL[Color.BLACK] if (file_index + rank) % 2 == 0 else SQUARE_SYMBOL[Color.WHITE])
             rows.append(space.join(row_chars))
 
         return "\n".join(rows)
@@ -300,7 +266,7 @@ class Board:
 # Utility Functions
 # ------------------------------------------------
 
-def index_is_valid(index: int) -> bool:
+def valid_index(index: int) -> bool:
     """Check if a bit index is valid (0-63)."""
     valid = True
     if not(0 <= index < 64):
@@ -342,15 +308,14 @@ def idx2sqr(index: int) -> str:
     ...
     63 -> h8
     """
-    if not 0 <= index < 64:
-        raise IndexError("Bit index must be in range 0-63")
+    valid_index(index)
 
     file_char = FILES[index % 8]
     rank_char = RANKS[index // 8]
     return f"{file_char}{rank_char}"
 
 
-def decomp_sqr(square: str) -> list[int, int]:
+def decomp_sqr(square: str) -> list[int]:
     """Decompose a square string into file and rank indies."""
     if len(square) != 2:
         raise ValueError(f"Invalid square: {square}")
