@@ -5,6 +5,7 @@ from models.bitboard import (
     ChessPiece,
     Color,
     Move,
+    MoveLog,
     Piece,
     Sqr,
     decomp_sqr,
@@ -149,6 +150,96 @@ def test_board_place_and_remove_piece():
     assert board.get_piece_at(square) is None
 
 
+def test_move_log_append_and_length():
+    log = MoveLog()
+    move_a = Move(Sqr("e2"), Sqr("e4"))
+    move_b = Move(Sqr("e7"), Sqr("e5"))
+
+    log.append(move_a)
+    log.append(move_b)
+
+    assert len(log.moves) == 2
+    assert log.moves[0] is move_a
+    assert log.moves[1] is move_b
+
+
+def test_move_log_undo_move():
+    log = MoveLog()
+    move = Move(Sqr("e2"), Sqr("e4"))
+    log.append(move)
+
+    undone = log.undo_move()
+    assert undone is move
+    assert len(log.moves) == 0
+    assert log.undo_move() is None
+
+
+def test_move_log_clear():
+    log = MoveLog()
+    log.append(Move(Sqr("e1"), Sqr("g1")))
+    assert log.white_castled is True
+
+    log.clear()
+    assert log.moves == []
+    assert log.white_castled is False
+    assert log.black_castled is False
+
+
+def test_move_log_castle_flags_white():
+    log = MoveLog()
+    log.append(Move(Sqr("e1"), Sqr("g1")))
+    assert log.white_castled is True
+    assert log.black_castled is False
+
+    log.undo_move()
+    assert log.white_castled is False
+
+
+def test_move_log_castle_flags_black():
+    log = MoveLog()
+    log.append(Move(Sqr("e8"), Sqr("c8")))
+    assert log.black_castled is True
+    assert log.white_castled is False
+
+
+def test_board_make_move_logs_half_move():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+    assert len(board.moveLog.moves) == 1
+    assert board.moveLog.moves[0].from_square.alg == "e2"
+    assert board.moveLog.moves[0].to_square.alg == "e4"
+
+
+def test_board_clear_board_resets_move_log():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+    assert len(board.moveLog.moves) == 1
+
+    board.clear_board()
+    assert board.moveLog.moves == []
+
+
+def test_board_setup_resets_move_log():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+    assert len(board.moveLog.moves) == 1
+
+    board.setup_starting_position()
+    assert board.moveLog.moves == []
+
+
+def test_clear_pieces_does_not_reset_move_log():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+
+    board.clear_pieces(ChessPiece(color=Color.WHITE, name=Piece.PAWN))
+    assert len(board.moveLog.moves) == 1
+
+
 def test_board_setup_and_move():
     board = Board()
     board.setup_starting_position()
@@ -157,6 +248,7 @@ def test_board_setup_and_move():
     board.make_move(Move(Sqr("e2"), Sqr("e4")))
 
     assert board.whiteTurn is False
+    assert len(board.moveLog.moves) == 1
     assert board.get_piece_at(Sqr("e2")) is None
     moved_piece = board.get_piece_at(Sqr("e4"))
     assert moved_piece is not None

@@ -103,6 +103,50 @@ class Move:
         self.from_square = from_sqr
         self.to_square = to_sqr
 
+def _castle_color_for_move(move: Move) -> Color | None:
+    """Return the castling side if the move is a king two-square slide on the back rank."""
+    from_idx = move.from_square.idx
+    to_idx = move.to_square.idx
+    if from_idx == 4 and to_idx in (6, 2):
+        return Color.WHITE
+    if from_idx == 60 and to_idx in (62, 58):
+        return Color.BLACK
+    return None
+
+@dataclass(slots=True)
+class MoveLog:
+    """A log of half-moves (single-side turns) played on the board."""
+
+    moves: list[Move] = field(default_factory=list)
+    white_castled: bool = False
+    black_castled: bool = False
+
+    def append(self, move: Move) -> None:
+        self.moves.append(move)
+        self._recompute_castle_flags()
+
+    def undo_move(self) -> Move | None:
+        if not self.moves:
+            return None
+        move = self.moves.pop()
+        self._recompute_castle_flags()
+        return move
+
+    def clear(self) -> None:
+        self.moves.clear()
+        self.white_castled = False
+        self.black_castled = False
+
+    def _recompute_castle_flags(self) -> None:
+        self.white_castled = False
+        self.black_castled = False
+        for move in self.moves:
+            color = _castle_color_for_move(move)
+            if color == Color.WHITE:
+                self.white_castled = True
+            elif color == Color.BLACK:
+                self.black_castled = True
+
 @dataclass(slots=True)
 class Board:
     """
@@ -119,6 +163,7 @@ class Board:
     )
 
     whiteTurn: bool = True
+    moveLog: MoveLog = field(default_factory=MoveLog)
 
     def __post_init__(self):
         for key in self.bitboards:
@@ -154,6 +199,7 @@ class Board:
         """Set all bits in all piece bitboards to 0."""
         for key in self.bitboards:
             self.bitboards[key] = mpz(0)
+        self.moveLog.clear()
 
     def get_piece_at(self, square: Sqr) -> ChessPiece | None:
         """Return the piece at the given square, or None if the square is empty."""
@@ -211,6 +257,7 @@ class Board:
         self.place_piece(moving_piece, to_square)
 
         self.whiteTurn = not self.whiteTurn
+        self.moveLog.append(move)
 
     # ------------------------
     # Display
