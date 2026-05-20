@@ -27,6 +27,7 @@ class Piece(Enum):
 
 COLOR_LIST = list(Color) # A list of all colors for easy iteration when initializing the bitboards
 PIECE_LIST = list(Piece) # A list of all piece types for easy iteration when initializing the bitboards
+PROMOTION_PIECES = (Piece.QUEEN, Piece.ROOK, Piece.BISHOP, Piece.KNIGHT)
 
 PIECE_SYMBOL = {
     (Color.WHITE, Piece.KING):   "♔",
@@ -92,16 +93,41 @@ class Sqr:
     def symbol(self) -> str:
         return SQUARE_SYMBOL[self.color]
 
+class MoveType(Enum):
+    """An enum to represent the type of a chess move."""
+    NORMAL = auto()
+    CASTLE = auto()
+    EN_PASSANT = auto()
+    PROMOTION = auto()
+
 class Move:
     """A lightweight value object describing a chess move.
 
     Stores both algebraic squares and computed bit indices for convenience.
     """
 
-    def __init__(self, from_sqr: Sqr, to_sqr: Sqr):
+    def __init__(
+        self,
+        from_sqr: Sqr,
+        to_sqr: Sqr,
+        promotion_piece: Piece | None = None,
+    ):
         self.from_square = from_sqr
         self.to_square = to_sqr
+        self.moved_piece: ChessPiece | None = None
         self.captured_piece: ChessPiece | None = None
+        self.promotion_piece: Piece | None = None
+        self.type: MoveType = MoveType.NORMAL
+        self.isLegal: bool = True
+
+        if promotion_piece is not None:
+            if promotion_piece not in PROMOTION_PIECES:
+                raise ValueError(
+                    f"Invalid promotion piece: {promotion_piece!r}. "
+                    f"Must be one of {PROMOTION_PIECES}"
+                )
+            self.promotion_piece = promotion_piece
+            self.type = MoveType.PROMOTION
 
 def _castle_color_for_move(move: Move) -> Color | None:
     """Return the castling side if the move is a king two-square slide on the back rank."""
@@ -248,14 +274,49 @@ class Board:
         moving_piece = self.get_piece_at(from_square)
         if moving_piece is None:
             raise ValueError(f"No piece to move from {from_square.alg}")
+        move.moved_piece = moving_piece
 
-        captured_piece = self.get_piece_at(to_square)
-        move.captured_piece = captured_piece
-        if captured_piece is not None:
-            self.remove_piece(captured_piece, to_square)
+        ep_target = self._en_passant_target_index(moving_piece.color)
+        is_en_passant = (
+            moving_piece.name == Piece.PAWN
+            and ep_target is not None
+            and ep_target == to_square.idx
+            and abs(from_square.idx % 8 - to_square.idx % 8) == 1
+        )
+
+        is_promotion = (
+            moving_piece.name == Piece.PAWN
+            and (
+                move.promotion_piece is not None
+                or self._is_promotion_rank(moving_piece.color, to_square)
+            )
+        )
+
+        if is_en_passant:
+            last = self.moveLog.moves[-1]
+            capture_square = last.to_square
+            captured_piece = self.get_piece_at(capture_square)
+            move.captured_piece = captured_piece
+            if captured_piece is not None:
+                self.remove_piece(captured_piece, capture_square)
+            if not is_promotion:
+                move.type = MoveType.EN_PASSANT
+        else:
+            captured_piece = self.get_piece_at(to_square)
+            move.captured_piece = captured_piece
+            if captured_piece is not None:
+                self.remove_piece(captured_piece, to_square)
 
         self.remove_piece(moving_piece, from_square)
-        self.place_piece(moving_piece, to_square)
+
+        if is_promotion:
+            move.type = MoveType.PROMOTION
+            promo_piece = move.promotion_piece or Piece.QUEEN
+            move.promotion_piece = promo_piece
+            promoted = ChessPiece(color=moving_piece.color, name=promo_piece)
+            self.place_piece(promoted, to_square)
+        else:
+            self.place_piece(moving_piece, to_square)
 
         self.whiteTurn = not self.whiteTurn
         self.moveLog.append(move)
@@ -269,20 +330,41 @@ class Board:
         from_square = move.from_square
         to_square = move.to_square
 
-        moving_piece = self.get_piece_at(to_square)
-        if moving_piece is None:
-            raise ValueError(f"No piece to undo from {to_square.alg}")
+        if move.type == MoveType.PROMOTION:
+            promoted = self.get_piece_at(to_square)
+            if promoted is None or move.moved_piece is None:
+                raise ValueError(f"No promoted piece to undo from {to_square.alg}")
+            self.remove_piece(promoted, to_square)
+            pawn = ChessPiece(color=move.moved_piece.color, name=Piece.PAWN)
+            self.place_piece(pawn, from_square)
+        else:
+            moving_piece = self.get_piece_at(to_square)
+            if moving_piece is None:
+                raise ValueError(f"No piece to undo from {to_square.alg}")
 
-        self.remove_piece(moving_piece, to_square)
-        self.place_piece(moving_piece, from_square)
+            self.remove_piece(moving_piece, to_square)
+            self.place_piece(moving_piece, from_square)
 
         if move.captured_piece is not None:
-            self.place_piece(move.captured_piece, to_square)
+            if move.type == MoveType.EN_PASSANT:
+                cap_idx = (
+                    to_square.idx - 8
+                    if move.moved_piece is not None and move.moved_piece.color == Color.WHITE
+                    else to_square.idx + 8
+                )
+                self.place_piece(move.captured_piece, Sqr(cap_idx))
+            else:
+                self.place_piece(move.captured_piece, to_square)
 
         self.whiteTurn = not self.whiteTurn
 
     def _opponent(self, color: Color) -> Color:
+        """Return the opponent color."""
         return Color.BLACK if color == Color.WHITE else Color.WHITE
+    
+    # ------------------------
+    # Pawn moves
+    # ------------------------
 
     def _en_passant_target_index(self, color: Color) -> int | None:
         """Return the passed-over square index if the opponent just double-pushed a pawn."""
@@ -300,6 +382,28 @@ class Board:
             return None
 
         return (from_idx + to_idx) // 2
+
+    def _is_promotion_rank(self, color: Color, square: Sqr) -> bool:
+        """Return True if the square is the back rank where a pawn promotes."""
+        rank_idx = square.idx // 8
+        return rank_idx == 7 if color == Color.WHITE else rank_idx == 0
+
+    def _pawn_moves_to_square(
+        self,
+        color: Color,
+        from_sq: Sqr,
+        to_sq: Sqr,
+        *,
+        en_passant: bool = False,
+    ) -> list[Move]:
+        """Return one move, or four promotion moves, for a pawn reaching to_sq."""
+        if self._is_promotion_rank(color, to_sq):
+            return [Move(from_sq, to_sq, promotion_piece=p) for p in PROMOTION_PIECES]
+
+        move = Move(from_sq, to_sq)
+        if en_passant:
+            move.type = MoveType.EN_PASSANT
+        return [move]
 
     def _pawn_moves_from_square(self, color: Color, square: Sqr) -> list[Move]:
         moves: list[Move] = []
@@ -325,7 +429,7 @@ class Board:
         if 0 <= one_ahead_rank <= 7:
             one_sq = Sqr(forward_one)
             if self.get_piece_at(one_sq) is None:
-                moves.append(Move(square, one_sq))
+                moves.extend(self._pawn_moves_to_square(color, square, one_sq))
 
                 if rank_idx == start_rank:
                     two_sq = Sqr(forward_two)
@@ -338,7 +442,7 @@ class Board:
                 cap_sq = Sqr(cap_idx)
                 target = self.get_piece_at(cap_sq)
                 if target is not None and target.color == opponent:
-                    moves.append(Move(square, cap_sq))
+                    moves.extend(self._pawn_moves_to_square(color, square, cap_sq))
 
         passed_idx = self._en_passant_target_index(color)
         if passed_idx is not None:
@@ -346,7 +450,11 @@ class Board:
             if abs(passed_file - file_idx) == 1:
                 capturer_rank = passed_idx // 8 - rank_step
                 if capturer_rank == rank_idx:
-                    moves.append(Move(square, Sqr(passed_idx)))
+                    moves.extend(
+                        self._pawn_moves_to_square(
+                            color, square, Sqr(passed_idx), en_passant=True
+                        )
+                    )
 
         return moves
 

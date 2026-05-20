@@ -1,11 +1,13 @@
 import pytest
 
 from models.bitboard import (
+    PROMOTION_PIECES,
     Board,
     ChessPiece,
     Color,
     Move,
     MoveLog,
+    MoveType,
     Piece,
     Sqr,
     decomp_sqr,
@@ -98,6 +100,20 @@ def test_move_initialization():
     assert move.to_square.alg == "a4"
     assert move.from_square.idx == sqr2idx("a2")
     assert move.to_square.idx == sqr2idx("a4")
+    assert move.promotion_piece is None
+    assert move.type == MoveType.NORMAL
+
+
+def test_move_promotion_initialization():
+    move = Move(Sqr("e7"), Sqr("e8"), promotion_piece=Piece.QUEEN)
+    assert move.promotion_piece == Piece.QUEEN
+    assert move.type == MoveType.PROMOTION
+
+
+@pytest.mark.parametrize("invalid_piece", [Piece.PAWN, Piece.KING])
+def test_move_invalid_promotion_piece_raises(invalid_piece):
+    with pytest.raises(ValueError):
+        Move(Sqr("e7"), Sqr("e8"), promotion_piece=invalid_piece)
 
 
 def test_sqr_init_from_algebraic():
@@ -277,6 +293,29 @@ def _move_algs(moves: list[Move]) -> set[tuple[str, str]]:
     return {(m.from_square.alg, m.to_square.alg) for m in moves}
 
 
+def _find_move(
+    moves: list[Move],
+    from_alg: str,
+    to_alg: str,
+    promotion_piece: Piece | None = None,
+) -> Move | None:
+    for move in moves:
+        if move.from_square.alg != from_alg or move.to_square.alg != to_alg:
+            continue
+        if promotion_piece is not None and move.promotion_piece != promotion_piece:
+            continue
+        return move
+    return None
+
+
+def _moves_to_square(moves: list[Move], from_alg: str, to_alg: str) -> list[Move]:
+    return [
+        m
+        for m in moves
+        if m.from_square.alg == from_alg and m.to_square.alg == to_alg
+    ]
+
+
 def test_get_pawn_moves_starting_position_white():
     board = Board()
     board.setup_starting_position()
@@ -318,10 +357,13 @@ def test_get_pawn_moves_diagonal_capture():
     board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("d4"))
     board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("c5"))
 
-    moves = _move_algs(board.get_pawn_moves())
+    moves = board.get_pawn_moves()
 
-    assert ("d4", "c5") in moves
-    assert ("d4", "e5") not in moves
+    assert ("d4", "c5") in _move_algs(moves)
+    assert ("d4", "e5") not in _move_algs(moves)
+    capture = _find_move(moves, "d4", "c5")
+    assert capture is not None
+    assert capture.type == MoveType.NORMAL
 
 
 def test_get_pawn_moves_en_passant_white():
@@ -331,9 +373,12 @@ def test_get_pawn_moves_en_passant_white():
     board.whiteTurn = False
     board.make_move(Move(Sqr("d7"), Sqr("d5")))
 
-    moves = _move_algs(board.get_pawn_moves())
+    moves = board.get_pawn_moves()
 
-    assert ("e5", "d6") in moves
+    assert ("e5", "d6") in _move_algs(moves)
+    ep = _find_move(moves, "e5", "d6")
+    assert ep is not None
+    assert ep.type == MoveType.EN_PASSANT
 
 
 def test_get_pawn_moves_en_passant_black():
@@ -342,9 +387,12 @@ def test_get_pawn_moves_en_passant_black():
     board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d4"))
     board.make_move(Move(Sqr("e2"), Sqr("e4")))
 
-    moves = _move_algs(board.get_pawn_moves())
+    moves = board.get_pawn_moves()
 
-    assert ("d4", "e3") in moves
+    assert ("d4", "e3") in _move_algs(moves)
+    ep = _find_move(moves, "d4", "e3")
+    assert ep is not None
+    assert ep.type == MoveType.EN_PASSANT
 
 
 def test_get_pawn_moves_no_en_passant_after_intervening_move():
@@ -361,6 +409,157 @@ def test_get_pawn_moves_no_en_passant_after_intervening_move():
     moves = _move_algs(board.get_pawn_moves())
 
     assert ("e5", "d6") not in moves
+
+
+def test_get_pawn_moves_promotion_forward_white():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e7"))
+
+    promo_moves = _moves_to_square(board.get_pawn_moves(), "e7", "e8")
+
+    assert len(promo_moves) == 4
+    assert {m.promotion_piece for m in promo_moves} == set(PROMOTION_PIECES)
+    assert all(m.type == MoveType.PROMOTION for m in promo_moves)
+
+
+def test_get_pawn_moves_promotion_forward_black():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("e2"))
+    board.whiteTurn = False
+
+    promo_moves = _moves_to_square(board.get_pawn_moves(), "e2", "e1")
+
+    assert len(promo_moves) == 4
+    assert {m.promotion_piece for m in promo_moves} == set(PROMOTION_PIECES)
+    assert all(m.type == MoveType.PROMOTION for m in promo_moves)
+
+
+def test_get_pawn_moves_promotion_capture_white():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e7"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("d8"))
+
+    promo_moves = _moves_to_square(board.get_pawn_moves(), "e7", "d8")
+
+    assert len(promo_moves) == 4
+    assert {m.promotion_piece for m in promo_moves} == set(PROMOTION_PIECES)
+    assert all(m.type == MoveType.PROMOTION for m in promo_moves)
+
+
+@pytest.mark.parametrize("promo", PROMOTION_PIECES)
+def test_make_move_promotion_forward_white(promo):
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e7"))
+
+    move = Move(Sqr("e7"), Sqr("e8"), promotion_piece=promo)
+    board.make_move(move)
+
+    assert move.type == MoveType.PROMOTION
+    assert move.promotion_piece == promo
+    assert move.moved_piece is not None
+    assert move.moved_piece.name == Piece.PAWN
+    assert board.get_piece_at(Sqr("e7")) is None
+    piece = board.get_piece_at(Sqr("e8"))
+    assert piece is not None
+    assert piece.color == Color.WHITE
+    assert piece.name == promo
+
+
+def test_make_move_promotion_capture():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e7"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("d8"))
+
+    move = Move(Sqr("e7"), Sqr("d8"), promotion_piece=Piece.ROOK)
+    board.make_move(move)
+
+    assert move.type == MoveType.PROMOTION
+    assert move.captured_piece is not None
+    assert move.captured_piece.name == Piece.ROOK
+    assert board.get_piece_at(Sqr("d8")) is not None
+    assert board.get_piece_at(Sqr("d8")).name == Piece.ROOK
+    assert board.get_piece_at(Sqr("d8")).color == Color.WHITE
+
+
+def test_board_undo_move_promotion():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e7"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("d8"))
+
+    board.make_move(Move(Sqr("e7"), Sqr("d8"), promotion_piece=Piece.QUEEN))
+    board.undo_move()
+
+    assert board.whiteTurn is True
+    assert board.get_piece_at(Sqr("d8")) is not None
+    assert board.get_piece_at(Sqr("d8")).name == Piece.ROOK
+    assert board.get_piece_at(Sqr("d8")).color == Color.BLACK
+    pawn = board.get_piece_at(Sqr("e7"))
+    assert pawn is not None
+    assert pawn.name == Piece.PAWN
+    assert pawn.color == Color.WHITE
+
+
+def test_make_move_en_passant_white():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e5"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d7"))
+    board.whiteTurn = False
+    board.make_move(Move(Sqr("d7"), Sqr("d5")))
+
+    ep = Move(Sqr("e5"), Sqr("d6"))
+    board.make_move(ep)
+
+    assert ep.type == MoveType.EN_PASSANT
+    assert ep.captured_piece is not None
+    assert ep.captured_piece.color == Color.BLACK
+    assert ep.captured_piece.name == Piece.PAWN
+    assert board.get_piece_at(Sqr("e5")) is None
+    assert board.get_piece_at(Sqr("d5")) is None
+    capturer = board.get_piece_at(Sqr("d6"))
+    assert capturer is not None
+    assert capturer.color == Color.WHITE
+    assert capturer.name == Piece.PAWN
+
+
+def test_make_move_en_passant_black():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e2"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d4"))
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+
+    ep = Move(Sqr("d4"), Sqr("e3"))
+    board.make_move(ep)
+
+    assert ep.type == MoveType.EN_PASSANT
+    assert ep.captured_piece is not None
+    assert ep.captured_piece.color == Color.WHITE
+    assert ep.captured_piece.name == Piece.PAWN
+    assert board.get_piece_at(Sqr("d4")) is None
+    assert board.get_piece_at(Sqr("e4")) is None
+    capturer = board.get_piece_at(Sqr("e3"))
+    assert capturer is not None
+    assert capturer.color == Color.BLACK
+    assert capturer.name == Piece.PAWN
+
+
+def test_board_undo_move_en_passant():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e5"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d7"))
+    board.whiteTurn = False
+    board.make_move(Move(Sqr("d7"), Sqr("d5")))
+    board.make_move(Move(Sqr("e5"), Sqr("d6")))
+
+    board.undo_move()
+
+    assert board.whiteTurn is True
+    assert board.get_piece_at(Sqr("d6")) is None
+    white_pawn = board.get_piece_at(Sqr("e5"))
+    black_pawn = board.get_piece_at(Sqr("d5"))
+    assert white_pawn is not None
+    assert white_pawn.color == Color.WHITE
+    assert black_pawn is not None
+    assert black_pawn.color == Color.BLACK
 
 
 def test_board_undo_move_restores_capture():
