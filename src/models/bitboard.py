@@ -113,6 +113,13 @@ class MoveType(Enum):
     EN_PASSANT = auto()
     PROMOTION = auto()
 
+class GameOutcome(Enum):
+    """How the game ended, or ongoing if play continues."""
+    ONGOING = auto()
+    CHECKMATE = auto()
+    STALEMATE = auto()
+    THREEFOLD_REPETITION = auto()
+
 class Move:
     """A lightweight value object describing a chess move.
 
@@ -915,6 +922,83 @@ class Board:
             self.undo_move()
 
         return legal
+
+    # ------------------------
+    # Game conclusion
+    # ------------------------
+
+    def is_checkmate(self) -> bool:
+        """Return True if the side to move has no legal moves and is in check."""
+        if self.get_all_legal_moves():
+            return False
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        return self._is_in_check(color)
+
+    def is_stalemate(self) -> bool:
+        """Return True if the side to move has no legal moves and is not in check."""
+        if self.get_all_legal_moves():
+            return False
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        return not self._is_in_check(color)
+
+    def is_threefold_repetition(self) -> bool:
+        """Return True if this position has occurred at least three times in the game."""
+        return self._repetition_count() >= 3
+
+    def is_game_over(self) -> bool:
+        """Return True if the game has ended by checkmate, stalemate, or threefold repetition."""
+        return self.game_outcome() != GameOutcome.ONGOING
+
+    def game_outcome(self) -> GameOutcome:
+        """Return how the game ended, or ONGOING if play continues."""
+        if not self.get_all_legal_moves():
+            color = Color.WHITE if self.whiteTurn else Color.BLACK
+            if self._is_in_check(color):
+                return GameOutcome.CHECKMATE
+            return GameOutcome.STALEMATE
+        if self._repetition_count() >= 3:
+            return GameOutcome.THREEFOLD_REPETITION
+        return GameOutcome.ONGOING
+
+    def _castling_rights_key(self) -> tuple[bool, bool, bool, bool]:
+        """KQkq castling availability for position comparison (FEN rule 3b)."""
+        return (
+            self._has_castling_rights(Color.WHITE, kingside=True),
+            self._has_castling_rights(Color.WHITE, kingside=False),
+            self._has_castling_rights(Color.BLACK, kingside=True),
+            self._has_castling_rights(Color.BLACK, kingside=False),
+        )
+
+    def _position_key(self) -> tuple[object, ...]:
+        """Hashable key for repetition: pieces, side to move, castling, en passant."""
+        pieces = tuple(
+            int(self.bitboards[key])
+            for key in sorted(
+                self.bitboards.keys(),
+                key=lambda k: (k[0].value, k[1].value),
+            )
+        )
+        side = Color.WHITE if self.whiteTurn else Color.BLACK
+        ep = self._en_passant_target_index(side)
+        return (pieces, self.whiteTurn, self._castling_rights_key(), ep)
+
+    def _repetition_count(self) -> int:
+        """Count how many times the current position occurred in the game so far."""
+        target = self._position_key()
+        moves = list(self.moveLog.moves)
+
+        for _ in moves:
+            self.undo_move()
+
+        count = 0
+        if self._position_key() == target:
+            count += 1
+        for move in moves:
+            self.make_move(move)
+            if self._position_key() == target:
+                count += 1
+
+        return count
 
     # ------------------------
     # Serialization
