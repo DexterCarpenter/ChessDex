@@ -738,7 +738,9 @@ class Board:
         try:
             attacked: set[int] = set()
             for move in self.get_pawn_moves():
-                attacked.add(move.to_square.idx)
+                # Pawns attack diagonally only; forward/double pushes are not attacks.
+                if abs(move.from_square.idx % 8 - move.to_square.idx % 8) == 1:
+                    attacked.add(move.to_square.idx)
             for move in self.get_knight_moves():
                 attacked.add(move.to_square.idx)
             for move in self.get_bishop_moves():

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from models.bitboard import (
@@ -1544,6 +1546,19 @@ def _board_from_fen(fen: str) -> Board:
     import chess
 
     return board_from_chess(chess.Board(fen))
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_pawn_double_push_destination_not_counted_as_attack():
+    """A pawn's double-push target must not block the king from capturing there."""
+    board = Board.from_pgn(FIXTURES / "pawn_doublepush_take.pgn")
+    assert not board.is_checkmate()
+    assert not board._is_square_attacked(Sqr("d5"), Color.BLACK)
+    move = _find_legal_move(board, "c4", "d5")
+    assert move.from_square == Sqr("c4")
+    assert move.to_square == Sqr("d5")
 
 
 def test_is_checkmate():
