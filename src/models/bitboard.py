@@ -99,9 +99,9 @@ class Move:
     """
 
     def __init__(self, from_sqr: Sqr, to_sqr: Sqr):
-        # keep original square strings
         self.from_square = from_sqr
         self.to_square = to_sqr
+        self.captured_piece: ChessPiece | None = None
 
 def _castle_color_for_move(move: Move) -> Color | None:
     """Return the castling side if the move is a king two-square slide on the back rank."""
@@ -250,6 +250,7 @@ class Board:
             raise ValueError(f"No piece to move from {from_square.alg}")
 
         captured_piece = self.get_piece_at(to_square)
+        move.captured_piece = captured_piece
         if captured_piece is not None:
             self.remove_piece(captured_piece, to_square)
 
