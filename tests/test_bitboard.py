@@ -827,6 +827,172 @@ def test_get_rook_moves_ignores_opponent_rooks():
     assert _rook_targets(moves, "e6") == set()
 
 
+def _queen_targets(moves: list[Move], from_alg: str) -> set[str]:
+    return {m.to_square.alg for m in moves if m.from_square.alg == from_alg}
+
+
+_E4_BISHOP_TARGETS = {
+    "a8",
+    "b1",
+    "b7",
+    "c2",
+    "c6",
+    "d3",
+    "d5",
+    "f3",
+    "f5",
+    "g2",
+    "g6",
+    "h1",
+    "h7",
+}
+_E4_ROOK_TARGETS = {
+    "a4",
+    "b4",
+    "c4",
+    "d4",
+    "e1",
+    "e2",
+    "e3",
+    "e5",
+    "e6",
+    "e7",
+    "e8",
+    "f4",
+    "g4",
+    "h4",
+}
+
+
+def test_queen_moves_from_square_empty_returns_empty():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+    board.remove_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+
+    assert board._queen_moves_from_square(Sqr("e4")) == []
+
+
+def test_queen_moves_from_square_center_e4():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+
+    moves = board._queen_moves_from_square(Sqr("e4"))
+
+    assert _queen_targets(moves, "e4") == _E4_BISHOP_TARGETS | _E4_ROOK_TARGETS
+    assert len(moves) == 27
+    assert all(m.type == MoveType.NORMAL for m in moves)
+
+
+def test_queen_moves_from_square_corners_a1():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("a1"))
+
+    moves = board._queen_moves_from_square(Sqr("a1"))
+
+    assert _queen_targets(moves, "a1") == {
+        "a2",
+        "a3",
+        "a4",
+        "a5",
+        "a6",
+        "a7",
+        "a8",
+        "b1",
+        "b2",
+        "c1",
+        "c3",
+        "d1",
+        "d4",
+        "e1",
+        "e5",
+        "f1",
+        "f6",
+        "g1",
+        "g7",
+        "h1",
+        "h8",
+    }
+
+
+def test_queen_moves_from_square_blocks_friendly_on_diagonal():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("g6"))
+
+    targets = _queen_targets(board._queen_moves_from_square(Sqr("e4")), "e4")
+
+    assert "f5" in targets
+    assert "g6" not in targets
+    assert "h7" not in targets
+    assert "h4" in targets
+
+
+def test_queen_moves_from_square_blocks_friendly_on_rank():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("g4"))
+
+    targets = _queen_targets(board._queen_moves_from_square(Sqr("e4")), "e4")
+
+    assert "f4" in targets
+    assert "g4" not in targets
+    assert "h4" not in targets
+    assert "g6" in targets
+
+
+def test_queen_moves_from_square_allows_capture():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("g4"))
+
+    moves = board._queen_moves_from_square(Sqr("e4"))
+
+    assert ("e4", "g4") in _move_algs(moves)
+    assert "h4" not in _queen_targets(moves, "e4")
+
+
+def test_queen_moves_from_square_one_ray_blocked_others_open():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e6"))
+
+    targets = _queen_targets(board._queen_moves_from_square(Sqr("e4")), "e4")
+
+    assert "e5" in targets
+    assert "e6" not in targets
+    assert "e7" not in targets
+    assert "h7" in targets
+
+
+def test_get_queen_moves_starting_position_white():
+    board = Board()
+    board.setup_starting_position()
+
+    assert board.get_queen_moves() == []
+
+
+def test_get_queen_moves_only_current_side():
+    board = Board()
+    board.setup_starting_position()
+    board.whiteTurn = False
+
+    assert board.get_queen_moves() == []
+
+
+def test_get_queen_moves_ignores_opponent_queens():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.QUEEN), Sqr("e6"))
+    board.whiteTurn = True
+
+    moves = board.get_queen_moves()
+
+    assert _queen_targets(moves, "e4") == (
+        _E4_BISHOP_TARGETS | _E4_ROOK_TARGETS
+    ) - {"e7", "e8"}
+    assert _queen_targets(moves, "e6") == set()
+
+
 @pytest.mark.parametrize("promo", PROMOTION_PIECES)
 def test_make_move_promotion_forward_white(promo):
     board = Board()

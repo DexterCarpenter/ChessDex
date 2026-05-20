@@ -606,6 +606,28 @@ class Board:
                 moves.extend(self._rook_moves_from_square(Sqr(index)))
         
         return moves
+    
+    # ------------------------
+    # Queen moves
+    # ------------------------
+
+    def _queen_moves_from_square(self, square: Sqr) -> list[Move]:
+        """Return pseudo-legal queen moves from the given square (bishop + rook rays)."""
+        if self.get_piece_at(square) is None:
+            return []
+        return self._bishop_moves_from_square(square) + self._rook_moves_from_square(square)
+
+    def get_queen_moves(self) -> list[Move]:
+        """Get all possible moves for all queens of the color of the current turn."""
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        moves: list[Move] = []
+        queen_bb = int(self.bitboards[(color, Piece.QUEEN)])
+
+        for index in range(64):
+            if (queen_bb >> index) & 1:
+                moves.extend(self._queen_moves_from_square(Sqr(index)))
+
+        return moves
 
     # ------------------------
     # Display
