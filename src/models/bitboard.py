@@ -129,49 +129,67 @@ class Move:
             self.promotion_piece = promotion_piece
             self.type = MoveType.PROMOTION
 
+_WHITE_KING_START = 4
+_BLACK_KING_START = 60
+_WHITE_ROOK_QUEENSIDE_START = 0
+_WHITE_ROOK_KINGSIDE_START = 7
+_BLACK_ROOK_QUEENSIDE_START = 56
+_BLACK_ROOK_KINGSIDE_START = 63
+
+
+def _king_start_index(color: Color) -> int:
+    return _WHITE_KING_START if color == Color.WHITE else _BLACK_KING_START
+
+
+def _rook_castle_start_indices(color: Color) -> tuple[int, int]:
+    if color == Color.WHITE:
+        return _WHITE_ROOK_QUEENSIDE_START, _WHITE_ROOK_KINGSIDE_START
+    return _BLACK_ROOK_QUEENSIDE_START, _BLACK_ROOK_KINGSIDE_START
+
+
 def _castle_color_for_move(move: Move) -> Color | None:
-    """Return the castling side if the move is a king two-square slide on the back rank."""
+    """Return the color if the move is a king two-square slide on the back rank."""
     from_idx = move.from_square.idx
     to_idx = move.to_square.idx
-    if from_idx == 4 and to_idx in (6, 2):
+    if from_idx == _WHITE_KING_START and to_idx in (6, 2):
         return Color.WHITE
-    if from_idx == 60 and to_idx in (62, 58):
+    if from_idx == _BLACK_KING_START and to_idx in (62, 58):
         return Color.BLACK
     return None
+
 
 @dataclass(slots=True)
 class MoveLog:
     """A log of half-moves (single-side turns) played on the board."""
 
     moves: list[Move] = field(default_factory=list)
-    white_castled: bool = False
-    black_castled: bool = False
 
     def append(self, move: Move) -> None:
         self.moves.append(move)
-        self._recompute_castle_flags()
 
     def undo_move(self) -> Move | None:
         if not self.moves:
             return None
-        move = self.moves.pop()
-        self._recompute_castle_flags()
-        return move
+        return self.moves.pop()
 
     def clear(self) -> None:
         self.moves.clear()
-        self.white_castled = False
-        self.black_castled = False
 
-    def _recompute_castle_flags(self) -> None:
-        self.white_castled = False
-        self.black_castled = False
+    def has_castling_rights(self, color: Color) -> bool:
+        """Return True if this color has not yet moved its king or either castle rook."""
+        king_start = _king_start_index(color)
+        queenside_rook, kingside_rook = _rook_castle_start_indices(color)
+
         for move in self.moves:
-            color = _castle_color_for_move(move)
-            if color == Color.WHITE:
-                self.white_castled = True
-            elif color == Color.BLACK:
-                self.black_castled = True
+            if _castle_color_for_move(move) == color:
+                return False
+            from_idx = move.from_square.idx
+            if from_idx == king_start:
+                return False
+            if from_idx in (queenside_rook, kingside_rook):
+                return False
+
+        return True
 
 @dataclass(slots=True)
 class Board:
@@ -292,6 +310,12 @@ class Board:
             )
         )
 
+        is_castle = (
+            moving_piece.name == Piece.KING
+            and from_square.idx // 8 == to_square.idx // 8
+            and abs(to_square.idx - from_square.idx) == 2
+        )
+
         if is_en_passant:
             last = self.moveLog.moves[-1]
             capture_square = last.to_square
@@ -318,6 +342,16 @@ class Board:
         else:
             self.place_piece(moving_piece, to_square)
 
+        if is_castle:
+            move.type = MoveType.CASTLE
+            kingside = to_square.idx > from_square.idx
+            rook_from, rook_to = self._castle_rook_squares(moving_piece.color, kingside)
+            rook = self.get_piece_at(rook_from)
+            if rook is None or rook.name != Piece.ROOK or rook.color != moving_piece.color:
+                raise ValueError(f"No rook to castle from {rook_from.alg}")
+            self.remove_piece(rook, rook_from)
+            self.place_piece(rook, rook_to)
+
         self.whiteTurn = not self.whiteTurn
         self.moveLog.append(move)
 
@@ -329,6 +363,17 @@ class Board:
 
         from_square = move.from_square
         to_square = move.to_square
+
+        if move.type == MoveType.CASTLE:
+            if move.moved_piece is None:
+                raise ValueError("Cannot undo castle without moved_piece on move")
+            kingside = to_square.idx > from_square.idx
+            rook_from, rook_to = self._castle_rook_squares(move.moved_piece.color, kingside)
+            rook = self.get_piece_at(rook_to)
+            if rook is None:
+                raise ValueError(f"No rook to undo castle from {rook_to.alg}")
+            self.remove_piece(rook, rook_to)
+            self.place_piece(rook, rook_from)
 
         if move.type == MoveType.PROMOTION:
             promoted = self.get_piece_at(to_square)
@@ -626,6 +671,162 @@ class Board:
         for index in range(64):
             if (queen_bb >> index) & 1:
                 moves.extend(self._queen_moves_from_square(Sqr(index)))
+
+        return moves
+    
+    # ------------------------
+    # King moves
+    # ------------------------
+
+    def _castle_rook_squares(self, color: Color, kingside: bool) -> tuple[Sqr, Sqr]:
+        """Return (rook_from, rook_to) squares for a castling side."""
+        if color == Color.WHITE:
+            if kingside:
+                return Sqr(_WHITE_ROOK_KINGSIDE_START), Sqr(5)
+            return Sqr(_WHITE_ROOK_QUEENSIDE_START), Sqr(3)
+        if kingside:
+            return Sqr(_BLACK_ROOK_KINGSIDE_START), Sqr(61)
+        return Sqr(_BLACK_ROOK_QUEENSIDE_START), Sqr(59)
+
+    def _attacked_square_indices(self, by_color: Color) -> set[int]:
+        """Return all squares attacked by the given color (excludes king moves)."""
+        was_white = self.whiteTurn
+        self.whiteTurn = by_color == Color.WHITE
+        try:
+            attacked: set[int] = set()
+            for move in self.get_pawn_moves():
+                attacked.add(move.to_square.idx)
+            for move in self.get_knight_moves():
+                attacked.add(move.to_square.idx)
+            for move in self.get_bishop_moves():
+                attacked.add(move.to_square.idx)
+            for move in self.get_rook_moves():
+                attacked.add(move.to_square.idx)
+            for move in self.get_queen_moves():
+                attacked.add(move.to_square.idx)
+            return attacked
+        finally:
+            self.whiteTurn = was_white
+
+    def _is_square_attacked(self, square: Sqr, by_color: Color) -> bool:
+        return square.idx in self._attacked_square_indices(by_color)
+
+    def _king_on_start_square(self, color: Color) -> bool:
+        king_sq = Sqr(_king_start_index(color))
+        piece = self.get_piece_at(king_sq)
+        return piece is not None and piece.color == color and piece.name == Piece.KING
+
+    def _castling_rook_in_place(self, color: Color, kingside: bool) -> bool:
+        queenside, kingside_start = _rook_castle_start_indices(color)
+        rook_idx = kingside_start if kingside else queenside
+        piece = self.get_piece_at(Sqr(rook_idx))
+        return piece is not None and piece.color == color and piece.name == Piece.ROOK
+
+    def _squares_empty(self, indices: tuple[int, ...]) -> bool:
+        return all(self.get_piece_at(Sqr(idx)) is None for idx in indices)
+
+    def _castle_path_safe(
+        self, color: Color, *, kingside: bool
+    ) -> bool:
+        """King not in check and does not pass through or land on attacked squares."""
+        opponent = self._opponent(color)
+        if kingside:
+            if color == Color.WHITE:
+                safe_indices = (_WHITE_KING_START, 5, 6)
+            else:
+                safe_indices = (_BLACK_KING_START, 61, 62)
+        elif color == Color.WHITE:
+            safe_indices = (_WHITE_KING_START, 3, 2)
+        else:
+            safe_indices = (_BLACK_KING_START, 59, 58)
+
+        return all(
+            not self._is_square_attacked(Sqr(idx), opponent) for idx in safe_indices
+        )
+
+    def _can_castle_kingside(self, color: Color) -> bool:
+        if not self.moveLog.has_castling_rights(color):
+            return False
+        if not self._king_on_start_square(color):
+            return False
+        if not self._castling_rook_in_place(color, kingside=True):
+            return False
+        if color == Color.WHITE:
+            if not self._squares_empty((5, 6)):
+                return False
+        elif not self._squares_empty((61, 62)):
+            return False
+        return self._castle_path_safe(color, kingside=True)
+
+    def _can_castle_queenside(self, color: Color) -> bool:
+        if not self.moveLog.has_castling_rights(color):
+            return False
+        if not self._king_on_start_square(color):
+            return False
+        if not self._castling_rook_in_place(color, kingside=False):
+            return False
+        if color == Color.WHITE:
+            if not self._squares_empty((1, 2, 3)):
+                return False
+        elif not self._squares_empty((57, 58, 59)):
+            return False
+        return self._castle_path_safe(color, kingside=False)
+
+    def _king_moves_from_square(self, square: Sqr) -> list[Move]:
+        """Return pseudo-legal king moves (one step and castling) from the given square."""
+        moves: list[Move] = []
+        king = self.get_piece_at(square)
+        if king is None or king.name != Piece.KING:
+            return moves
+
+        color = king.color
+        opponent = self._opponent(color)
+        file_idx = square.idx % 8
+        rank_idx = square.idx // 8
+
+        for file_step, rank_step in (
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (-1, 1),
+            (1, -1),
+            (-1, -1),
+        ):
+            f = file_idx + file_step
+            r = rank_idx + rank_step
+            if not 0 <= f < 8 or not 0 <= r < 8:
+                continue
+            target_sq = Sqr(r * 8 + f)
+            target_piece = self.get_piece_at(target_sq)
+            if target_piece is not None and target_piece.color == color:
+                continue
+            if self._is_square_attacked(target_sq, opponent):
+                continue
+            moves.append(Move(square, target_sq))
+
+        if square.idx == _king_start_index(color):
+            if self._can_castle_kingside(color):
+                move = Move(square, Sqr(6 if color == Color.WHITE else 62))
+                move.type = MoveType.CASTLE
+                moves.append(move)
+            if self._can_castle_queenside(color):
+                move = Move(square, Sqr(2 if color == Color.WHITE else 58))
+                move.type = MoveType.CASTLE
+                moves.append(move)
+
+        return moves
+
+    def get_king_moves(self) -> list[Move]:
+        """Get all possible moves for the king of the color of the current turn."""
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        moves: list[Move] = []
+        king_bb = int(self.bitboards[(color, Piece.KING)])
+
+        for index in range(64):
+            if (king_bb >> index) & 1:
+                moves.extend(self._king_moves_from_square(Sqr(index)))
 
         return moves
 

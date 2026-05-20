@@ -193,29 +193,43 @@ def test_move_log_undo_move():
 def test_move_log_clear():
     log = MoveLog()
     log.append(Move(Sqr("e1"), Sqr("g1")))
-    assert log.white_castled is True
+    assert log.has_castling_rights(Color.WHITE) is False
 
     log.clear()
     assert log.moves == []
-    assert log.white_castled is False
-    assert log.black_castled is False
+    assert log.has_castling_rights(Color.WHITE) is True
+    assert log.has_castling_rights(Color.BLACK) is True
 
 
-def test_move_log_castle_flags_white():
+def test_move_log_castling_rights_lost_after_white_castle():
     log = MoveLog()
     log.append(Move(Sqr("e1"), Sqr("g1")))
-    assert log.white_castled is True
-    assert log.black_castled is False
+    assert log.has_castling_rights(Color.WHITE) is False
+    assert log.has_castling_rights(Color.BLACK) is True
 
     log.undo_move()
-    assert log.white_castled is False
+    assert log.has_castling_rights(Color.WHITE) is True
 
 
-def test_move_log_castle_flags_black():
+def test_move_log_castling_rights_lost_after_black_castle():
     log = MoveLog()
     log.append(Move(Sqr("e8"), Sqr("c8")))
-    assert log.black_castled is True
-    assert log.white_castled is False
+    assert log.has_castling_rights(Color.BLACK) is False
+    assert log.has_castling_rights(Color.WHITE) is True
+
+
+def test_move_log_castling_rights_lost_after_king_move():
+    log = MoveLog()
+    log.append(Move(Sqr("e1"), Sqr("e2")))
+
+    assert log.has_castling_rights(Color.WHITE) is False
+
+
+def test_move_log_castling_rights_lost_after_rook_move():
+    log = MoveLog()
+    log.append(Move(Sqr("a1"), Sqr("a2")))
+
+    assert log.has_castling_rights(Color.WHITE) is False
 
 
 def test_board_make_move_logs_half_move():
@@ -991,6 +1005,188 @@ def test_get_queen_moves_ignores_opponent_queens():
         _E4_BISHOP_TARGETS | _E4_ROOK_TARGETS
     ) - {"e7", "e8"}
     assert _queen_targets(moves, "e6") == set()
+
+
+def _king_targets(moves: list[Move], from_alg: str) -> set[str]:
+    return {m.to_square.alg for m in moves if m.from_square.alg == from_alg}
+
+
+def _setup_white_kingside_castle(board: Board) -> None:
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("h1"))
+
+
+def _setup_white_queenside_castle(board: Board) -> None:
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("a1"))
+
+
+def test_king_moves_from_square_empty_returns_empty():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e4"))
+    board.remove_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e4"))
+
+    assert board._king_moves_from_square(Sqr("e4")) == []
+
+
+def test_king_moves_from_square_center_unattacked():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e4"))
+
+    targets = _king_targets(board._king_moves_from_square(Sqr("e4")), "e4")
+
+    assert targets == {
+        "d3",
+        "d4",
+        "d5",
+        "e3",
+        "e5",
+        "f3",
+        "f4",
+        "f5",
+    }
+
+
+def test_king_moves_from_square_cannot_move_into_attack():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("e8"))
+
+    targets = _king_targets(board._king_moves_from_square(Sqr("e4")), "e4")
+
+    assert "e5" not in targets
+    assert "d4" in targets
+
+
+def test_king_moves_from_square_blocks_friendly_piece():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e5"))
+
+    targets = _king_targets(board._king_moves_from_square(Sqr("e4")), "e4")
+
+    assert "e5" not in targets
+    assert "d5" in targets
+
+
+def test_king_moves_from_square_allows_capture():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("f5"))
+
+    moves = board._king_moves_from_square(Sqr("e4"))
+
+    assert ("e4", "f5") in _move_algs(moves)
+
+
+def test_get_king_moves_kingside_castle_available():
+    board = Board()
+    _setup_white_kingside_castle(board)
+
+    moves = board.get_king_moves()
+
+    castle = _find_move(moves, "e1", "g1")
+    assert castle is not None
+    assert castle.type == MoveType.CASTLE
+
+
+def test_get_king_moves_queenside_castle_available():
+    board = Board()
+    _setup_white_queenside_castle(board)
+
+    moves = board.get_king_moves()
+
+    castle = _find_move(moves, "e1", "c1")
+    assert castle is not None
+    assert castle.type == MoveType.CASTLE
+
+
+def test_get_king_moves_no_castle_when_path_blocked():
+    board = Board()
+    _setup_white_kingside_castle(board)
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("f1"))
+
+    moves = _move_algs(board.get_king_moves())
+
+    assert ("e1", "g1") not in moves
+
+
+def test_get_king_moves_no_castle_when_in_check():
+    board = Board()
+    _setup_white_kingside_castle(board)
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("e8"))
+
+    moves = _move_algs(board.get_king_moves())
+
+    assert ("e1", "g1") not in moves
+    assert ("e1", "c1") not in moves
+
+
+def test_get_king_moves_no_castle_through_attacked_square():
+    board = Board()
+    _setup_white_kingside_castle(board)
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("f8"))
+
+    moves = _move_algs(board.get_king_moves())
+
+    assert ("e1", "g1") not in moves
+
+
+def test_get_king_moves_no_castle_without_rights():
+    board = Board()
+    _setup_white_kingside_castle(board)
+    board.make_move(Move(Sqr("h1"), Sqr("h2")))
+    board.whiteTurn = True
+
+    moves = _move_algs(board.get_king_moves())
+
+    assert ("e1", "g1") not in moves
+
+
+def test_make_move_kingside_castle_moves_rook():
+    board = Board()
+    _setup_white_kingside_castle(board)
+
+    board.make_move(Move(Sqr("e1"), Sqr("g1")))
+
+    assert board.get_piece_at(Sqr("e1")) is None
+    assert board.get_piece_at(Sqr("g1")) is not None
+    assert board.get_piece_at(Sqr("g1")).name == Piece.KING
+    assert board.get_piece_at(Sqr("h1")) is None
+    assert board.get_piece_at(Sqr("f1")) is not None
+    assert board.get_piece_at(Sqr("f1")).name == Piece.ROOK
+    assert board.moveLog.moves[-1].type == MoveType.CASTLE
+    assert board.moveLog.has_castling_rights(Color.WHITE) is False
+
+
+def test_undo_move_kingside_castle_restores_rook_and_rights():
+    board = Board()
+    _setup_white_kingside_castle(board)
+    board.make_move(Move(Sqr("e1"), Sqr("g1")))
+
+    board.undo_move()
+
+    assert board.get_piece_at(Sqr("e1")) is not None
+    assert board.get_piece_at(Sqr("e1")).name == Piece.KING
+    assert board.get_piece_at(Sqr("g1")) is None
+    assert board.get_piece_at(Sqr("h1")) is not None
+    assert board.get_piece_at(Sqr("h1")).name == Piece.ROOK
+    assert board.get_piece_at(Sqr("f1")) is None
+    assert board.moveLog.has_castling_rights(Color.WHITE) is True
+
+
+def test_make_move_queenside_castle_moves_rook():
+    board = Board()
+    _setup_white_queenside_castle(board)
+
+    board.make_move(Move(Sqr("e1"), Sqr("c1")))
+
+    assert board.get_piece_at(Sqr("a1")) is None
+    assert board.get_piece_at(Sqr("d1")) is not None
+    assert board.get_piece_at(Sqr("d1")).name == Piece.ROOK
+    assert board.get_piece_at(Sqr("c1")).name == Piece.KING
 
 
 @pytest.mark.parametrize("promo", PROMOTION_PIECES)
