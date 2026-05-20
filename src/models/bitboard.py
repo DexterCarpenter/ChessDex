@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from gmpy2 import mpz
 from enum import Enum, auto
+from pathlib import Path
+from typing import TextIO
+
+from gmpy2 import mpz
 
 # ------------------------------------------------
 # Constants and Enums
@@ -208,6 +213,8 @@ class Board:
 
     whiteTurn: bool = True
     moveLog: MoveLog = field(default_factory=MoveLog)
+    castling_rights: frozenset[str] | None = None
+    ep_square: Sqr | None = None
 
     def __post_init__(self):
         for key in self.bitboards:
@@ -244,6 +251,8 @@ class Board:
         for key in self.bitboards:
             self.bitboards[key] = mpz(0)
         self.moveLog.clear()
+        self.castling_rights = None
+        self.ep_square = None
 
     def get_piece_at(self, square: Sqr) -> ChessPiece | None:
         """Return the piece at the given square, or None if the square is empty."""
@@ -279,7 +288,9 @@ class Board:
         self.bitboards[(Color.BLACK, Piece.KING)]   = mpz(0x1000000000000000)
 
         self.whiteTurn = True
-    
+        self.castling_rights = None
+        self.ep_square = None
+
     # ------------------------
     # Moves
     # ------------------------
@@ -411,7 +422,14 @@ class Board:
     # Pawn moves
     # ------------------------
 
-    def _en_passant_target_index(self, color: Color) -> int | None:
+    def _has_castling_rights(self, color: Color, *, kingside: bool) -> bool:
+        """Return True if the given color may castle on the given side."""
+        if self.castling_rights is not None:
+            flag = ("K" if kingside else "Q") if color == Color.WHITE else ("k" if kingside else "q")
+            return flag in self.castling_rights
+        return self.moveLog.has_castling_rights(color)
+
+    def _en_passant_target_index_from_log(self, color: Color) -> int | None:
         """Return the passed-over square index if the opponent just double-pushed a pawn."""
         if not self.moveLog.moves:
             return None
@@ -427,6 +445,12 @@ class Board:
             return None
 
         return (from_idx + to_idx) // 2
+
+    def _en_passant_target_index(self, color: Color) -> int | None:
+        """Return the en passant capture target square index, if any."""
+        if self.ep_square is not None:
+            return self.ep_square.idx
+        return self._en_passant_target_index_from_log(color)
 
     def _is_promotion_rank(self, color: Color, square: Sqr) -> bool:
         """Return True if the square is the back rank where a pawn promotes."""
@@ -745,7 +769,7 @@ class Board:
         )
 
     def _can_castle_kingside(self, color: Color) -> bool:
-        if not self.moveLog.has_castling_rights(color):
+        if not self._has_castling_rights(color, kingside=True):
             return False
         if not self._king_on_start_square(color):
             return False
@@ -759,7 +783,7 @@ class Board:
         return self._castle_path_safe(color, kingside=True)
 
     def _can_castle_queenside(self, color: Color) -> bool:
-        if not self.moveLog.has_castling_rights(color):
+        if not self._has_castling_rights(color, kingside=False):
             return False
         if not self._king_on_start_square(color):
             return False
@@ -884,6 +908,34 @@ class Board:
     # Display
     # ------------------------
 
+    # ------------------------
+    # Serialization
+    # ------------------------
+
+    def load_from_pgn(self, source: str | Path | TextIO) -> None:
+        """Load the initial position from the first game in a PGN file or stream."""
+        _import_pgn().load_into_board(self, source)
+
+    @classmethod
+    def from_pgn(cls, source: str | Path | TextIO) -> Board:
+        """Create a board from the initial position in a PGN file or stream."""
+        board = cls()
+        board.load_from_pgn(source)
+        return board
+
+    def save_to_pgn(
+        self,
+        dest: str | Path | TextIO,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        """Write the current position as a one-node PGN."""
+        _import_pgn().save_board(self, dest, headers=headers)
+
+    # ------------------------
+    # Display
+    # ------------------------
+
     def render(self) -> str:
         """Return a string representation of the board.
 
@@ -981,6 +1033,24 @@ def idx2sqr(index: int) -> str:
     file_char = FILES[index % 8]
     rank_char = RANKS[index // 8]
     return f"{file_char}{rank_char}"
+
+
+def _import_pgn():
+    """Load src/io/pgn.py without conflicting with the stdlib ``io`` package."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    name = "_chessdex_pgn"
+    if name not in sys.modules:
+        path = Path(__file__).resolve().parent.parent / "io" / "pgn.py"
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load PGN module from {path}")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+    return sys.modules[name]
 
 
 def decomp_sqr(square: str) -> list[int]:
