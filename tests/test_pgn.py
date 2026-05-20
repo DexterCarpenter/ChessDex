@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from models.bitboard import Board, Color, Sqr
+from models.bitboard import Board, ChessPiece, Color, Piece, Sqr
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -66,6 +66,20 @@ def test_ep_square_from_fen():
     board = Board.from_pgn(FIXTURES / "with_ep.pgn")
     assert board.ep_square == Sqr("e6")
     assert board._en_passant_target_index(Color.WHITE) == Sqr("e6").idx
+
+
+def test_load_position_after_movetext():
+    """PGN with movetext loads the final position, not the game start."""
+    board = Board.from_pgn(FIXTURES / "with_moves.pgn")
+    start = Board()
+    start.setup_starting_position()
+    assert not _pieces_equal(board, start)
+    assert board.get_piece_at(Sqr("g1")) == ChessPiece(
+        color=Color.WHITE, name=Piece.KING
+    )
+    assert board.get_piece_at(Sqr("f8")) == ChessPiece(
+        color=Color.BLACK, name=Piece.KING
+    )
 
 
 def test_load_empty_raises():

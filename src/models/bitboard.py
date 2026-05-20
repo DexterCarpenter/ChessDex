@@ -905,20 +905,18 @@ class Board:
         return legal
 
     # ------------------------
-    # Display
-    # ------------------------
-
-    # ------------------------
     # Serialization
     # ------------------------
 
     def load_from_pgn(self, source: str | Path | TextIO) -> None:
-        """Load the initial position from the first game in a PGN file or stream."""
-        _import_pgn().load_into_board(self, source)
+        """Load the position from the first game in a PGN file or stream."""
+        from chess_io.pgn import load_into_board
+
+        load_into_board(self, source)
 
     @classmethod
     def from_pgn(cls, source: str | Path | TextIO) -> Board:
-        """Create a board from the initial position in a PGN file or stream."""
+        """Create a board from the position in a PGN file or stream."""
         board = cls()
         board.load_from_pgn(source)
         return board
@@ -930,7 +928,9 @@ class Board:
         headers: dict[str, str] | None = None,
     ) -> None:
         """Write the current position as a one-node PGN."""
-        _import_pgn().save_board(self, dest, headers=headers)
+        from chess_io.pgn import save_board
+
+        save_board(self, dest, headers=headers)
 
     # ------------------------
     # Display
@@ -981,6 +981,13 @@ class Board:
             rows.append(space.join(row_chars))
 
         return "\n".join(rows)
+
+    def print_all_legal_moves(self) -> None:
+        """Print all legal moves for the color of the current turn."""
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        moves = self.get_all_legal_moves()
+        for move in moves:
+            print(move.to_square.alg)
 
 # ------------------------------------------------
 # Utility Functions
@@ -1033,24 +1040,6 @@ def idx2sqr(index: int) -> str:
     file_char = FILES[index % 8]
     rank_char = RANKS[index // 8]
     return f"{file_char}{rank_char}"
-
-
-def _import_pgn():
-    """Load src/io/pgn.py without conflicting with the stdlib ``io`` package."""
-    import importlib.util
-    import sys
-    from pathlib import Path
-
-    name = "_chessdex_pgn"
-    if name not in sys.modules:
-        path = Path(__file__).resolve().parent.parent / "io" / "pgn.py"
-        spec = importlib.util.spec_from_file_location(name, path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Cannot load PGN module from {path}")
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[name] = mod
-        spec.loader.exec_module(mod)
-    return sys.modules[name]
 
 
 def decomp_sqr(square: str) -> list[int]:

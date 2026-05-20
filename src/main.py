@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from models.bitboard import (
     Board,
     ChessPiece,

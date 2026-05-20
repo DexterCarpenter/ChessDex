@@ -81,14 +81,6 @@ def _castling_xfen(rights: frozenset[str] | None, board: Board) -> str:
     return "".join(parts) if parts else "-"
 
 
-def _ep_square_index(board: Board) -> int | None:
-    if board.ep_square is not None:
-        return board.ep_square.idx
-    return board._en_passant_target_index_from_log(
-        Color.WHITE if board.whiteTurn else Color.BLACK
-    )
-
-
 def apply_board_state(target: Board, source: Board) -> None:
     """Copy piece placement, turn, and FEN metadata from source onto target."""
     target.clear_board()
@@ -135,18 +127,27 @@ def chess_board_from_board(board: Board) -> chess.Board:
     return chess.Board(board_to_fen(board))
 
 
+def _chess_board_from_game(game: chess.pgn.Game) -> chess.Board:
+    """Return the position after the mainline (or FEN setup when there are no moves)."""
+    return game.end().board()
+
+
 def _load_from_stream(board: Board, stream: TextIO) -> None:
     game = chess.pgn.read_game(stream)
     if game is None:
         raise ValueError("No game found in PGN source")
-    apply_board_state(board, board_from_chess(game.board()))
+    apply_board_state(board, board_from_chess(_chess_board_from_game(game)))
 
 
 def load_into_board(
     board: Board,
     source: str | Path | TextIO,
 ) -> None:
-    """Load the initial position from the first game in a PGN file or stream."""
+    """Load the position from the first game in a PGN file or stream.
+
+    Uses the final position after mainline movetext, or the FEN/setup position
+    when the game has no moves.
+    """
     if isinstance(source, (str, Path)):
         with Path(source).open(encoding="utf-8") as stream:
             _load_from_stream(board, stream)
