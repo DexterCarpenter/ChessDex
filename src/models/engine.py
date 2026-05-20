@@ -1,7 +1,6 @@
 from models.bitboard import (
     Board,
     Color,
-    GameOutcome,
     Move,
     Piece,
 )
@@ -25,18 +24,8 @@ class Engine:
     def __init__(self):
         pass
 
-    def eval(self, board: Board) -> float:
-        """Placeholder evaluation from White's perspective (centipawn-scale material).
-
-        Positive scores favor White. Checkmate and draws are handled explicitly;
-        replace this with a fuller evaluation later.
-        """
-        outcome = board.game_outcome()
-        if outcome == GameOutcome.CHECKMATE:
-            return -MATE_SCORE if board.whiteTurn else MATE_SCORE
-        if outcome in (GameOutcome.STALEMATE, GameOutcome.THREEFOLD_REPETITION):
-            return 0.0
-
+    def _material_eval(self, board: Board) -> float:
+        """Material balance from White's perspective (no terminal or draw logic)."""
         score = 0.0
         for color in Color:
             sign = 1 if color == Color.WHITE else -1
@@ -47,17 +36,41 @@ class Engine:
                 score += sign * value * int(bitboard).bit_count()
         return score
 
+    def _terminal_eval(self, board: Board) -> float:
+        """Score when the side to move has no legal moves (checkmate or stalemate)."""
+        color = Color.WHITE if board.whiteTurn else Color.BLACK
+        if board._is_in_check(color):
+            return -MATE_SCORE if board.whiteTurn else MATE_SCORE
+        return 0.0
+
+    def eval(self, board: Board) -> float:
+        """Placeholder evaluation from White's perspective (centipawn-scale material).
+
+        Positive scores favor White. Checkmate, stalemate, and threefold repetition
+        are handled explicitly; replace material scoring with a fuller eval later.
+        """
+        legal_moves = board.get_all_legal_moves()
+        if not legal_moves:
+            return self._terminal_eval(board)
+        if board._repetition_count() >= 3:
+            return 0.0
+        return self._material_eval(board)
+
     def minimax(self, board: Board, depth: int) -> float:
         """Minimax search to the given depth, scoring leaves with eval().
 
         Returns the best achievable score from White's perspective.
         """
-        if board.is_game_over() or depth == 0:
-            return self.eval(board)
+        if depth <= 0:
+            return self._material_eval(board)
+
+        legal_moves = board.get_all_legal_moves()
+        if not legal_moves:
+            return self._terminal_eval(board)
 
         if board.whiteTurn:
             best = -INF
-            for move in board.get_all_legal_moves():
+            for move in legal_moves:
                 board.make_move(move)
                 value = self.minimax(board, depth - 1)
                 board.undo_move()
@@ -66,7 +79,7 @@ class Engine:
             return best
 
         best = INF
-        for move in board.get_all_legal_moves():
+        for move in legal_moves:
             board.make_move(move)
             value = self.minimax(board, depth - 1)
             board.undo_move()
