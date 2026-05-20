@@ -567,6 +567,135 @@ def test_get_knight_moves_ignores_opponent_knights():
     assert _knight_targets(moves, "c6") == set()
 
 
+def _bishop_targets(moves: list[Move], from_alg: str) -> set[str]:
+    return {m.to_square.alg for m in moves if m.from_square.alg == from_alg}
+
+
+def test_bishop_moves_from_square_empty_returns_empty():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr("e4"))
+    board.remove_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr("e4"))
+
+    assert board._bishop_moves_from_square(Sqr("e4")) == []
+
+
+def test_bishop_moves_from_square_center_e4():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr("e4"))
+
+    moves = board._bishop_moves_from_square(Sqr("e4"))
+
+    assert _bishop_targets(moves, "e4") == {
+        "a8",
+        "b1",
+        "b7",
+        "c2",
+        "c6",
+        "d3",
+        "d5",
+        "f3",
+        "f5",
+        "g2",
+        "g6",
+        "h1",
+        "h7",
+    }
+    assert len(moves) == 13
+    assert all(m.type == MoveType.NORMAL for m in moves)
+
+
+@pytest.mark.parametrize(
+    "from_alg, expected_targets",
+    [
+        ("a1", {"b2", "c3", "d4", "e5", "f6", "g7", "h8"}),
+        ("h8", {"a1", "b2", "c3", "d4", "e5", "f6", "g7"}),
+    ],
+)
+def test_bishop_moves_from_square_corners(from_alg, expected_targets):
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr(from_alg))
+
+    moves = board._bishop_moves_from_square(Sqr(from_alg))
+
+    assert _bishop_targets(moves, from_alg) == expected_targets
+
+
+def test_bishop_moves_from_square_blocks_friendly_piece():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("g6"))
+
+    targets = _bishop_targets(board._bishop_moves_from_square(Sqr("e4")), "e4")
+
+    assert "f5" in targets
+    assert "g6" not in targets
+    assert "h7" not in targets
+
+
+def test_bishop_moves_from_square_allows_capture():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("g6"))
+
+    moves = board._bishop_moves_from_square(Sqr("e4"))
+
+    assert ("e4", "g6") in _move_algs(moves)
+    assert "h7" not in _bishop_targets(moves, "e4")
+
+
+def test_bishop_moves_from_square_one_ray_blocked_others_open():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("d5"))
+
+    targets = _bishop_targets(board._bishop_moves_from_square(Sqr("e4")), "e4")
+
+    assert "d5" not in targets
+    assert "c6" not in targets
+    assert "a8" not in targets
+    assert "f5" in targets
+    assert "h7" in targets
+
+
+def test_get_bishop_moves_starting_position_white():
+    board = Board()
+    board.setup_starting_position()
+
+    assert board.get_bishop_moves() == []
+
+
+def test_get_bishop_moves_only_current_side():
+    board = Board()
+    board.setup_starting_position()
+    board.whiteTurn = False
+
+    assert board.get_bishop_moves() == []
+
+
+def test_get_bishop_moves_ignores_opponent_bishops():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.BISHOP), Sqr("c6"))
+    board.whiteTurn = True
+
+    moves = board.get_bishop_moves()
+
+    assert _bishop_targets(moves, "e4") == {
+        "b1",
+        "c2",
+        "c6",
+        "d3",
+        "d5",
+        "f3",
+        "f5",
+        "g2",
+        "g6",
+        "h1",
+        "h7",
+    }
+    assert _bishop_targets(moves, "c6") == set()
+
+
 @pytest.mark.parametrize("promo", PROMOTION_PIECES)
 def test_make_move_promotion_forward_white(promo):
     board = Board()

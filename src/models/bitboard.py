@@ -520,6 +520,50 @@ class Board:
         return moves
 
     # ------------------------
+    # Bishop moves
+    # ------------------------
+
+    def _bishop_moves_from_square(self, square: Sqr) -> list[Move]:
+        """Return pseudo-legal bishop moves from the given square (empty or capture targets)."""
+        moves: list[Move] = []
+        bishop = self.get_piece_at(square)
+        if bishop is None:
+            return moves
+
+        file_idx = square.idx % 8
+        rank_idx = square.idx // 8
+
+        for file_step, rank_step in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+            f = file_idx + file_step
+            r = rank_idx + rank_step
+            while 0 <= f < 8 and 0 <= r < 8:
+                target_sq = Sqr(r * 8 + f)
+                target_piece = self.get_piece_at(target_sq)
+                if target_piece is None:
+                    moves.append(Move(square, target_sq))
+                elif target_piece.color == bishop.color:
+                    break
+                else:
+                    moves.append(Move(square, target_sq))
+                    break
+                f += file_step
+                r += rank_step
+
+        return moves
+
+    def get_bishop_moves(self) -> list[Move]:
+        """Get all possible moves for all bishops of the color of the current turn."""
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        moves: list[Move] = []
+        bishop_bb = int(self.bitboards[(color, Piece.BISHOP)])
+
+        for index in range(64):
+            if (bishop_bb >> index) & 1:
+                moves.extend(self._bishop_moves_from_square(Sqr(index)))
+
+        return moves
+
+    # ------------------------
     # Display
     # ------------------------
 
