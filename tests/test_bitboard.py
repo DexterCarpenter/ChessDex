@@ -696,6 +696,137 @@ def test_get_bishop_moves_ignores_opponent_bishops():
     assert _bishop_targets(moves, "c6") == set()
 
 
+def _rook_targets(moves: list[Move], from_alg: str) -> set[str]:
+    return {m.to_square.alg for m in moves if m.from_square.alg == from_alg}
+
+
+def test_rook_moves_from_square_empty_returns_empty():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("e4"))
+    board.remove_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("e4"))
+
+    assert board._rook_moves_from_square(Sqr("e4")) == []
+
+
+def test_rook_moves_from_square_center_e4():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("e4"))
+
+    moves = board._rook_moves_from_square(Sqr("e4"))
+
+    assert _rook_targets(moves, "e4") == {
+        "a4",
+        "b4",
+        "c4",
+        "d4",
+        "e1",
+        "e2",
+        "e3",
+        "e5",
+        "e6",
+        "e7",
+        "e8",
+        "f4",
+        "g4",
+        "h4",
+    }
+    assert len(moves) == 14
+    assert all(m.type == MoveType.NORMAL for m in moves)
+
+
+@pytest.mark.parametrize(
+    "from_alg, expected_targets",
+    [
+        ("a1", {"a2", "a3", "a4", "a5", "a6", "a7", "a8", "b1", "c1", "d1", "e1", "f1", "g1", "h1"}),
+        ("h8", {"a8", "b8", "c8", "d8", "e8", "f8", "g8", "h1", "h2", "h3", "h4", "h5", "h6", "h7"}),
+    ],
+)
+def test_rook_moves_from_square_corners(from_alg, expected_targets):
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr(from_alg))
+
+    moves = board._rook_moves_from_square(Sqr(from_alg))
+
+    assert _rook_targets(moves, from_alg) == expected_targets
+
+
+def test_rook_moves_from_square_blocks_friendly_piece():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("g4"))
+
+    targets = _rook_targets(board._rook_moves_from_square(Sqr("e4")), "e4")
+
+    assert "f4" in targets
+    assert "g4" not in targets
+    assert "h4" not in targets
+
+
+def test_rook_moves_from_square_allows_capture():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("g4"))
+
+    moves = board._rook_moves_from_square(Sqr("e4"))
+
+    assert ("e4", "g4") in _move_algs(moves)
+    assert "h4" not in _rook_targets(moves, "e4")
+
+
+def test_rook_moves_from_square_one_ray_blocked_others_open():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e6"))
+
+    targets = _rook_targets(board._rook_moves_from_square(Sqr("e4")), "e4")
+
+    assert "e5" in targets
+    assert "e6" not in targets
+    assert "e7" not in targets
+    assert "e8" not in targets
+    assert "h4" in targets
+
+
+def test_get_rook_moves_starting_position_white():
+    board = Board()
+    board.setup_starting_position()
+
+    assert board.get_rook_moves() == []
+
+
+def test_get_rook_moves_only_current_side():
+    board = Board()
+    board.setup_starting_position()
+    board.whiteTurn = False
+
+    assert board.get_rook_moves() == []
+
+
+def test_get_rook_moves_ignores_opponent_rooks():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("e6"))
+    board.whiteTurn = True
+
+    moves = board.get_rook_moves()
+
+    assert _rook_targets(moves, "e4") == {
+        "a4",
+        "b4",
+        "c4",
+        "d4",
+        "e1",
+        "e2",
+        "e3",
+        "e5",
+        "e6",
+        "f4",
+        "g4",
+        "h4",
+    }
+    assert _rook_targets(moves, "e6") == set()
+
+
 @pytest.mark.parametrize("promo", PROMOTION_PIECES)
 def test_make_move_promotion_forward_white(promo):
     board = Board()
