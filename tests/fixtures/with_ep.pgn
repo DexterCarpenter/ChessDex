@@ -1,0 +1,8 @@
+[Event "En Passant"]
+[SetUp "1"]
+[FEN "8/8/8/4p3/8/3P4/8/8 w - e6 0 1"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+
+*
