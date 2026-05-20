@@ -831,6 +831,56 @@ class Board:
         return moves
 
     # ------------------------
+    # Get all Legal Moves
+    # ------------------------
+
+    def _find_king_square(self, color: Color) -> Sqr | None:
+        """Return the square of the given color's king, or None if absent."""
+        king_bb = int(self.bitboards[(color, Piece.KING)])
+        for index in range(64):
+            if (king_bb >> index) & 1:
+                return Sqr(index)
+        return None
+
+    def _is_in_check(self, color: Color) -> bool:
+        """Return True if the given color's king is attacked by the opponent."""
+        king_sq = self._find_king_square(color)
+        if king_sq is None:
+            return False
+        return self._is_square_attacked(king_sq, self._opponent(color))
+
+    def _get_all_moves(self) -> list[Move]:
+        """Get all pseudo-legal moves for all pieces of the color of the current turn."""
+        moves: list[Move] = []
+        moves.extend(self.get_pawn_moves())
+        moves.extend(self.get_knight_moves())
+        moves.extend(self.get_bishop_moves())
+        moves.extend(self.get_rook_moves())
+        moves.extend(self.get_queen_moves())
+        moves.extend(self.get_king_moves())
+        return moves
+
+    def get_all_legal_moves(self) -> list[Move]:
+        """Get all legal moves for all pieces of the color of the current turn.
+
+        Filters pseudo-legal moves by making each move and rejecting any that leave
+        the moving side's king in check (pinned pieces, moving into check, etc.).
+        """
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        legal: list[Move] = []
+
+        for move in self._get_all_moves():
+            self.make_move(move)
+            if not self._is_in_check(color):
+                move.isLegal = True
+                legal.append(move)
+            else:
+                move.isLegal = False
+            self.undo_move()
+
+        return legal
+
+    # ------------------------
     # Display
     # ------------------------
 

@@ -1189,6 +1189,96 @@ def test_make_move_queenside_castle_moves_rook():
     assert board.get_piece_at(Sqr("c1")).name == Piece.KING
 
 
+def test_get_all_moves_starting_position():
+    board = Board()
+    board.setup_starting_position()
+
+    moves = board._get_all_moves()
+
+    assert len(moves) == 20
+    assert ("e2", "e4") in _move_algs(moves)
+    assert ("b1", "c3") in _move_algs(moves)
+
+
+def test_get_all_legal_moves_starting_position():
+    board = Board()
+    board.setup_starting_position()
+
+    legal = board.get_all_legal_moves()
+
+    assert len(legal) == 20
+    assert all(m.isLegal for m in legal)
+    assert ("e2", "e4") in _move_algs(legal)
+
+
+def test_get_all_legal_moves_filters_move_into_check():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("e8"))
+
+    legal = _move_algs(board.get_all_legal_moves())
+
+    assert ("e1", "e2") not in legal
+    assert ("e1", "d1") in legal
+    assert ("e1", "f1") in legal
+
+
+def test_get_all_legal_moves_filters_pinned_piece_leaving_pin():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("e2"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("e8"))
+
+    pseudo = _move_algs(board._get_all_moves())
+    legal = _move_algs(board.get_all_legal_moves())
+
+    assert ("e2", "f2") in pseudo
+    assert ("e2", "f2") not in legal
+    assert ("e2", "e3") in legal
+
+
+def test_get_all_legal_moves_when_in_check_only_escapes():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("e8"))
+
+    legal = _move_algs(board.get_all_legal_moves())
+
+    assert ("e4", "e5") in legal
+    assert ("e4", "f4") not in legal
+    assert ("e1", "d1") in legal
+
+
+def test_is_in_check_detects_check():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("e8"))
+
+    assert board._is_in_check(Color.WHITE) is True
+    assert board._is_in_check(Color.BLACK) is False
+
+
+def test_get_all_legal_moves_en_passant_pin_reveals_check():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e5"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("e8"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d7"))
+    board.whiteTurn = False
+    board.make_move(Move(Sqr("d7"), Sqr("d5")))
+
+    pseudo = _move_algs(board._get_all_moves())
+    legal = _move_algs(board.get_all_legal_moves())
+
+    assert ("e5", "d6") in pseudo
+    assert ("e5", "d6") not in legal
+
+
 @pytest.mark.parametrize("promo", PROMOTION_PIECES)
 def test_make_move_promotion_forward_white(promo):
     board = Board()
