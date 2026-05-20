@@ -34,6 +34,14 @@ COLOR_LIST = list(Color) # A list of all colors for easy iteration when initiali
 PIECE_LIST = list(Piece) # A list of all piece types for easy iteration when initializing the bitboards
 PROMOTION_PIECES = (Piece.QUEEN, Piece.ROOK, Piece.BISHOP, Piece.KNIGHT)
 
+PIECE_SAN_LETTER = {
+    Piece.KING: "K",
+    Piece.QUEEN: "Q",
+    Piece.ROOK: "R",
+    Piece.BISHOP: "B",
+    Piece.KNIGHT: "N",
+}
+
 PIECE_SYMBOL = {
     (Color.WHITE, Piece.KING):   "♔",
     (Color.WHITE, Piece.QUEEN):  "♕",
@@ -179,6 +187,10 @@ class MoveLog:
 
     def clear(self) -> None:
         self.moves.clear()
+
+    def san_moves(self, board: Board) -> list[str]:
+        """Return SAN for each half-move in this log (restores board position afterward)."""
+        return board.move_history_san()
 
     def has_castling_rights(self, color: Color) -> bool:
         """Return True if this color has not yet moved its king or either castle rook."""
@@ -982,12 +994,124 @@ class Board:
 
         return "\n".join(rows)
 
-    def print_all_legal_moves(self) -> None:
-        """Print all legal moves for the color of the current turn."""
-        color = Color.WHITE if self.whiteTurn else Color.BLACK
-        moves = self.get_all_legal_moves()
+    def get_san(self, move: Move, *, suffix: bool = True) -> str:
+        """Return Standard Algebraic Notation for a move in the current position."""
+        piece = self.get_piece_at(move.from_square)
+        if piece is None:
+            raise ValueError(f"No piece on {move.from_square.alg}")
+
+        moving_color = piece.color
+
+        if piece.name == Piece.KING and abs(move.to_square.idx - move.from_square.idx) == 2:
+            san = "O-O" if move.to_square.idx > move.from_square.idx else "O-O-O"
+        elif piece.name == Piece.PAWN:
+            san = self._san_pawn(move, piece)
+        else:
+            san = self._san_piece(move, piece)
+
+        if suffix:
+            san += self._san_check_suffix(move, moving_color)
+        return san
+
+    def _san_pawn(self, move: Move, piece: ChessPiece) -> str:
+        to_alg = move.to_square.alg
+        ep_target = self._en_passant_target_index(piece.color)
+        is_en_passant = (
+            move.type == MoveType.EN_PASSANT
+            or (
+                ep_target is not None
+                and ep_target == move.to_square.idx
+                and abs(move.from_square.idx % 8 - move.to_square.idx % 8) == 1
+                and self.get_piece_at(move.to_square) is None
+            )
+        )
+        captured = self.get_piece_at(move.to_square)
+        is_capture = is_en_passant or (
+            captured is not None and captured.color != piece.color
+        )
+
+        if is_capture:
+            san = f"{move.from_square.file}x{to_alg}"
+        else:
+            san = to_alg
+
+        if (
+            move.type == MoveType.PROMOTION
+            or move.promotion_piece is not None
+            or self._is_promotion_rank(piece.color, move.to_square)
+        ):
+            promo = move.promotion_piece or Piece.QUEEN
+            san += f"={PIECE_SAN_LETTER[promo]}"
+        return san
+
+    def _san_piece(self, move: Move, piece: ChessPiece) -> str:
+        letter = PIECE_SAN_LETTER[piece.name]
+        disambig = self._san_disambiguation(move, piece.name)
+        captured = self.get_piece_at(move.to_square)
+        is_capture = captured is not None and captured.color != piece.color
+
+        san = letter + disambig
+        if is_capture:
+            san += "x"
+        san += move.to_square.alg
+        return san
+
+    def _san_disambiguation(self, move: Move, piece_name: Piece) -> str:
+        """File and/or rank when multiple pieces of the same type reach the same square."""
+        candidates: list[Move] = []
+        for candidate in self.get_all_legal_moves():
+            mover = self.get_piece_at(candidate.from_square)
+            if (
+                mover is not None
+                and mover.name == piece_name
+                and candidate.to_square.idx == move.to_square.idx
+            ):
+                candidates.append(candidate)
+
+        if len(candidates) <= 1:
+            return ""
+
+        files = {c.from_square.file for c in candidates}
+        ranks = {c.from_square.rank for c in candidates}
+
+        if len(files) == 1:
+            return str(move.from_square.rank)
+        if len(ranks) == 1:
+            return move.from_square.file
+        return move.from_square.alg
+
+    def _san_check_suffix(self, move: Move, moving_color: Color) -> str:
+        self.make_move(move)
+        try:
+            opponent = self._opponent(moving_color)
+            if not self._is_in_check(opponent):
+                return ""
+            if not self.get_all_legal_moves():
+                return "#"
+            return "+"
+        finally:
+            self.undo_move()
+
+    def move_history_san(self) -> list[str]:
+        """Return SAN for each half-move in moveLog (board ends in the same position)."""
+        moves = list(self.moveLog.moves)
+        for _ in moves:
+            self.undo_move()
+        sans: list[str] = []
         for move in moves:
-            print(move.to_square.alg)
+            sans.append(self.get_san(move))
+            self.make_move(move)
+        return sans
+
+    def print_all_legal_moves(self) -> None:
+        """Print all legal moves for the color of the current turn in SAN."""
+        for move in self.get_all_legal_moves():
+            print(self.get_san(move))
+
+    def print_move_history_san(self) -> None:
+        """Print moveLog half-moves as SAN, one per line."""
+        for san in self.move_history_san():
+            print(san)
 
 # ------------------------------------------------
 # Utility Functions
@@ -1059,3 +1183,8 @@ def decomp_sqr(square: str) -> list[int]:
     rank_index = int(rank_char) - 1
 
     return [file_index, rank_index]
+
+
+def get_san(board: Board, move: Move, *, suffix: bool = True) -> str:
+    """Return Standard Algebraic Notation for a move in the given board position."""
+    return board.get_san(move, suffix=suffix)

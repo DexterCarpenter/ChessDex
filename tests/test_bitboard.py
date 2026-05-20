@@ -11,6 +11,7 @@ from models.bitboard import (
     Piece,
     Sqr,
     decomp_sqr,
+    get_san,
     idx2sqr,
     valid_index,
     sqr2idx,
@@ -1411,3 +1412,118 @@ def test_board_undo_move_restores_capture():
     assert pawn is not None
     assert pawn.name == Piece.PAWN
     assert pawn.color == Color.BLACK
+
+
+def _find_legal_move(board: Board, from_alg: str, to_alg: str) -> Move:
+    for move in board.get_all_legal_moves():
+        if move.from_square.alg == from_alg and move.to_square.alg == to_alg:
+            return move
+    raise AssertionError(f"No legal move {from_alg}{to_alg}")
+
+
+def test_get_san_pawn_push():
+    board = Board()
+    board.setup_starting_position()
+    move = _find_legal_move(board, "e2", "e4")
+    assert board.get_san(move) == "e4"
+    assert get_san(board, move) == "e4"
+
+
+def test_get_san_knight_development():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+    move = _find_legal_move(board, "g8", "f6")
+    assert board.get_san(move) == "Nf6"
+
+
+def test_get_san_pawn_capture():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d5"))
+    move = _find_legal_move(board, "e4", "d5")
+    assert board.get_san(move) == "exd5"
+
+
+def test_get_san_piece_capture():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.BISHOP), Sqr("c4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("f7"))
+    move = _find_legal_move(board, "c4", "f7")
+    assert board.get_san(move) == "Bxf7"
+
+
+def test_get_san_kingside_castle():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("h1"))
+    move = _find_legal_move(board, "e1", "g1")
+    assert board.get_san(move) == "O-O"
+
+
+def test_get_san_promotion():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e7"))
+    move = Move(Sqr("e7"), Sqr("e8"), promotion_piece=Piece.QUEEN)
+    assert board.get_san(move, suffix=False) == "e8=Q"
+
+
+def test_get_san_check_suffix():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("d1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("e8"))
+    move = _find_legal_move(board, "d1", "d8")
+    assert board.get_san(move) == "Qd8+"
+
+
+def test_get_san_checkmate_suffix():
+    board = Board()
+    board.setup_starting_position()
+    for from_alg, to_alg in (
+        ("e2", "e4"),
+        ("e7", "e5"),
+        ("f1", "c4"),
+        ("b8", "c6"),
+        ("d1", "h5"),
+        ("g8", "f6"),
+    ):
+        board.make_move(_find_legal_move(board, from_alg, to_alg))
+    mate = _find_legal_move(board, "h5", "f7")
+    assert board.get_san(mate) == "Qxf7#"
+
+
+def test_get_san_disambiguate_knights():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("b1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("d1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("a8"))
+    move = _find_legal_move(board, "b1", "c3")
+    assert board.get_san(move) == "Nbc3"
+
+
+def test_move_history_san():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+    board.make_move(Move(Sqr("e7"), Sqr("e5")))
+    board.make_move(Move(Sqr("g1"), Sqr("f3")))
+    assert board.move_history_san() == ["e4", "e5", "Nf3"]
+    assert board.moveLog.san_moves(board) == ["e4", "e5", "Nf3"]
+
+
+def test_move_history_san_restores_position():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("d2"), Sqr("d4")))
+    board.make_move(Move(Sqr("d7"), Sqr("d5")))
+    piece_before = board.get_piece_at(Sqr("d4"))
+    board.move_history_san()
+    piece_after = board.get_piece_at(Sqr("d4"))
+    assert piece_before == piece_after
+    assert len(board.moveLog.moves) == 2
