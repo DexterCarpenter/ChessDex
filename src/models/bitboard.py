@@ -259,6 +259,108 @@ class Board:
         self.whiteTurn = not self.whiteTurn
         self.moveLog.append(move)
 
+    def undo_move(self) -> None:
+        """Undo the last move on the board."""
+        move = self.moveLog.undo_move()
+        if move is None:
+            return
+
+        from_square = move.from_square
+        to_square = move.to_square
+
+        moving_piece = self.get_piece_at(to_square)
+        if moving_piece is None:
+            raise ValueError(f"No piece to undo from {to_square.alg}")
+
+        self.remove_piece(moving_piece, to_square)
+        self.place_piece(moving_piece, from_square)
+
+        if move.captured_piece is not None:
+            self.place_piece(move.captured_piece, to_square)
+
+        self.whiteTurn = not self.whiteTurn
+
+    def _opponent(self, color: Color) -> Color:
+        return Color.BLACK if color == Color.WHITE else Color.WHITE
+
+    def _en_passant_target_index(self, color: Color) -> int | None:
+        """Return the passed-over square index if the opponent just double-pushed a pawn."""
+        if not self.moveLog.moves:
+            return None
+
+        last = self.moveLog.moves[-1]
+        from_idx = last.from_square.idx
+        to_idx = last.to_square.idx
+        if from_idx % 8 != to_idx % 8 or abs(from_idx - to_idx) != 16:
+            return None
+
+        mover = self.get_piece_at(last.to_square)
+        if mover is None or mover.name != Piece.PAWN or mover.color != self._opponent(color):
+            return None
+
+        return (from_idx + to_idx) // 2
+
+    def _pawn_moves_from_square(self, color: Color, square: Sqr) -> list[Move]:
+        moves: list[Move] = []
+        idx = square.idx
+        file_idx = idx % 8
+        rank_idx = idx // 8
+        opponent = self._opponent(color)
+
+        if color == Color.WHITE:
+            forward_one = idx + 8
+            forward_two = idx + 16
+            start_rank = 1
+            capture_deltas = (7, 9)
+            rank_step = 1
+        else:
+            forward_one = idx - 8
+            forward_two = idx - 16
+            start_rank = 6
+            capture_deltas = (-9, -7)
+            rank_step = -1
+
+        one_ahead_rank = rank_idx + rank_step
+        if 0 <= one_ahead_rank <= 7:
+            one_sq = Sqr(forward_one)
+            if self.get_piece_at(one_sq) is None:
+                moves.append(Move(square, one_sq))
+
+                if rank_idx == start_rank:
+                    two_sq = Sqr(forward_two)
+                    if self.get_piece_at(two_sq) is None:
+                        moves.append(Move(square, two_sq))
+
+        for delta in capture_deltas:
+            cap_idx = idx + delta
+            if 0 <= cap_idx < 64 and abs(cap_idx % 8 - file_idx) == 1:
+                cap_sq = Sqr(cap_idx)
+                target = self.get_piece_at(cap_sq)
+                if target is not None and target.color == opponent:
+                    moves.append(Move(square, cap_sq))
+
+        passed_idx = self._en_passant_target_index(color)
+        if passed_idx is not None:
+            passed_file = passed_idx % 8
+            if abs(passed_file - file_idx) == 1:
+                capturer_rank = passed_idx // 8 - rank_step
+                if capturer_rank == rank_idx:
+                    moves.append(Move(square, Sqr(passed_idx)))
+
+        return moves
+
+    def get_pawn_moves(self) -> list[Move]:
+        """Get all possible moves for all pawns of the color of the current turn."""
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        moves: list[Move] = []
+        pawn_bb = int(self.bitboards[(color, Piece.PAWN)])
+
+        for index in range(64):
+            if (pawn_bb >> index) & 1:
+                moves.extend(self._pawn_moves_from_square(color, Sqr(index)))
+
+        return moves
+
     # ------------------------
     # Display
     # ------------------------

@@ -255,3 +255,127 @@ def test_board_setup_and_move():
     assert moved_piece.name == Piece.PAWN
     assert moved_piece.color == Color.WHITE
     assert "♙" in board.render()
+
+
+def test_board_undo_move():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+
+    board.undo_move()
+
+    assert board.whiteTurn is True
+    assert board.moveLog.moves == []
+    pawn = board.get_piece_at(Sqr("e2"))
+    assert pawn is not None
+    assert pawn.name == Piece.PAWN
+    assert pawn.color == Color.WHITE
+    assert board.get_piece_at(Sqr("e4")) is None
+
+
+def _move_algs(moves: list[Move]) -> set[tuple[str, str]]:
+    return {(m.from_square.alg, m.to_square.alg) for m in moves}
+
+
+def test_get_pawn_moves_starting_position_white():
+    board = Board()
+    board.setup_starting_position()
+
+    moves = _move_algs(board.get_pawn_moves())
+
+    assert len(moves) == 16
+    assert ("e2", "e3") in moves
+    assert ("e2", "e4") in moves
+    assert ("a2", "a3") in moves
+    assert ("h2", "h4") in moves
+
+
+def test_get_pawn_moves_single_push():
+    board = Board()
+    board.setup_starting_position()
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+    board.make_move(Move(Sqr("a7"), Sqr("a6")))
+
+    moves = _move_algs(board.get_pawn_moves())
+
+    assert ("e4", "e5") in moves
+    assert ("e4", "e6") not in moves
+
+
+def test_get_pawn_moves_no_double_when_blocked():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e2"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e3"))
+
+    moves = _move_algs(board.get_pawn_moves())
+
+    assert ("e2", "e3") not in moves
+    assert ("e2", "e4") not in moves
+
+
+def test_get_pawn_moves_diagonal_capture():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("d4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("c5"))
+
+    moves = _move_algs(board.get_pawn_moves())
+
+    assert ("d4", "c5") in moves
+    assert ("d4", "e5") not in moves
+
+
+def test_get_pawn_moves_en_passant_white():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e5"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d7"))
+    board.whiteTurn = False
+    board.make_move(Move(Sqr("d7"), Sqr("d5")))
+
+    moves = _move_algs(board.get_pawn_moves())
+
+    assert ("e5", "d6") in moves
+
+
+def test_get_pawn_moves_en_passant_black():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e2"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d4"))
+    board.make_move(Move(Sqr("e2"), Sqr("e4")))
+
+    moves = _move_algs(board.get_pawn_moves())
+
+    assert ("d4", "e3") in moves
+
+
+def test_get_pawn_moves_no_en_passant_after_intervening_move():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e5"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("b1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d7"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KNIGHT), Sqr("b8"))
+    board.whiteTurn = False
+    board.make_move(Move(Sqr("d7"), Sqr("d5")))
+    board.make_move(Move(Sqr("b1"), Sqr("c3")))
+    board.make_move(Move(Sqr("b8"), Sqr("c6")))
+
+    moves = _move_algs(board.get_pawn_moves())
+
+    assert ("e5", "d6") not in moves
+
+
+def test_board_undo_move_restores_capture():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("a1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("a2"))
+
+    board.make_move(Move(Sqr("a1"), Sqr("a2")))
+    board.undo_move()
+
+    rook = board.get_piece_at(Sqr("a1"))
+    pawn = board.get_piece_at(Sqr("a2"))
+    assert rook is not None
+    assert rook.name == Piece.ROOK
+    assert rook.color == Color.WHITE
+    assert pawn is not None
+    assert pawn.name == Piece.PAWN
+    assert pawn.color == Color.BLACK
