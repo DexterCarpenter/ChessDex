@@ -96,3 +96,42 @@ def test_minimax_finds_winning_capture(engine: Engine):
     board.whiteTurn = True
     assert engine.eval(board) == 4.0
     assert engine.minimax(board, 1) == 9.0
+
+
+def test_get_best_move_finds_winning_capture(engine: Engine):
+    board = _empty_board()
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("a8"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("h8"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("a1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("b1"))
+    board.whiteTurn = True
+
+    move = engine.get_best_move(board, 1)
+    assert move is not None
+    assert move.from_square.alg == "a1"
+    assert move.to_square.alg == "a8"
+
+
+def test_get_best_move_restores_board(engine: Engine):
+    board = _empty_board()
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("a8"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("h8"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("a1"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("b1"))
+    board.whiteTurn = True
+    before = board._position_key()
+
+    engine.get_best_move(board, 2)
+
+    assert board._position_key() == before
+    assert board.whiteTurn
+
+
+def test_get_best_move_returns_none_when_game_over(engine: Engine):
+    board = _empty_board()
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("h8"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("f7"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("g6"))
+    board.whiteTurn = False
+    assert board.is_stalemate()
+    assert engine.get_best_move(board, 2) is None

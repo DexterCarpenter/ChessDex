@@ -2,6 +2,7 @@ from models.bitboard import (
     Board,
     Color,
     GameOutcome,
+    Move,
     Piece,
 )
 
@@ -72,3 +73,36 @@ class Engine:
             if value < best:
                 best = value
         return best
+
+    def get_best_move(self, board: Board, depth: int) -> Move | None:
+        """Return the best legal move for the side to move at the given search depth.
+
+        Uses minimax() to score each root move. Returns None when there are no
+        legal moves (checkmate or stalemate).
+        """
+        legal_moves = board.get_all_legal_moves()
+        if not legal_moves:
+            return None
+
+        if board.whiteTurn:
+            best_value = -INF
+            best_move = legal_moves[0]
+            for move in legal_moves:
+                board.make_move(move)
+                value = self.minimax(board, depth - 1)
+                board.undo_move()
+                if value > best_value:
+                    best_value = value
+                    best_move = move
+            return best_move
+
+        best_value = INF
+        best_move = legal_moves[0]
+        for move in legal_moves:
+            board.make_move(move)
+            value = self.minimax(board, depth - 1)
+            board.undo_move()
+            if value < best_value:
+                best_value = value
+                best_move = move
+        return best_move
