@@ -7,6 +7,7 @@ from models.bitboard import (
     Move,
     MoveLog,
     Piece,
+    Position,
     Sqr,
     decomp_sqr,
     idx2sqr,
@@ -379,3 +380,62 @@ def test_board_undo_move_restores_capture():
     assert pawn is not None
     assert pawn.name == Piece.PAWN
     assert pawn.color == Color.BLACK
+
+
+def test_position_default_board_is_empty():
+    pos = Position()
+    for row in pos.board:
+        assert all(cell is None for cell in row)
+
+
+@pytest.mark.parametrize(
+    "square",
+    ["a1", "h8", "e4", "b3"],
+)
+def test_position_getitem_setitem_with_sqr(square):
+    pos = Position()
+    piece = ChessPiece(color=Color.WHITE, name=Piece.KNIGHT)
+
+    pos[Sqr(square)] = piece
+    assert pos[Sqr(square)] is piece
+
+
+def test_position_getitem_setitem_with_sqr_from_index():
+    pos = Position()
+    square = Sqr(28)
+    piece = ChessPiece(color=Color.BLACK, name=Piece.QUEEN)
+
+    pos[square] = piece
+    assert pos[Sqr("e4")] is piece
+
+
+def test_position_sqr_index_maps_to_board_coords():
+    pos = Position()
+    marker = object()
+    square = Sqr("e4")
+    pos[square] = marker
+
+    file_index, rank_index = decomp_sqr("e4")
+    assert pos.board[rank_index][file_index] is marker
+    assert pos.board[square.idx // 8][square.idx % 8] is marker
+
+
+def test_position_int_index_getitem_setitem_row():
+    pos = Position()
+    row = [ChessPiece(color=Color.WHITE, name=Piece.ROOK)] + [None] * 7
+
+    pos[0] = row
+    assert pos[0] is row
+    assert pos.board[0] is row
+
+
+def test_position_int_index_replaces_row_without_affecting_other_ranks():
+    pos = Position()
+    piece = ChessPiece(color=Color.WHITE, name=Piece.PAWN)
+    custom_row = [None] * 8
+
+    pos[Sqr("a8")] = piece
+    pos[0] = custom_row
+
+    assert pos[Sqr("a8")] is piece
+    assert pos[0] is custom_row

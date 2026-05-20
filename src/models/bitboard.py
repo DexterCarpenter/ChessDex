@@ -102,6 +102,7 @@ class Move:
         # keep original square strings
         self.from_square = from_sqr
         self.to_square = to_sqr
+        self.captured_piece: ChessPiece | None = None
 
 def _castle_color_for_move(move: Move) -> Color | None:
     """Return the castling side if the move is a king two-square slide on the back rank."""
@@ -146,6 +147,29 @@ class MoveLog:
                 self.white_castled = True
             elif color == Color.BLACK:
                 self.black_castled = True
+
+class Position:
+    """A lightweight class to represent a simplified chess position."""
+
+    def __init__(self):
+        self.board = [[None for _ in range(8)] for _ in range(8)]
+
+    @staticmethod
+    def _sqr_coords(square: Sqr) -> tuple[int, int]:
+        return square.idx // 8, square.idx % 8
+
+    def __getitem__(self, index: int | Sqr):
+        if isinstance(index, Sqr):
+            row, col = self._sqr_coords(index)
+            return self.board[row][col]
+        return self.board[index]
+
+    def __setitem__(self, index: int | Sqr, value) -> None:
+        if isinstance(index, Sqr):
+            row, col = self._sqr_coords(index)
+            self.board[row][col] = value
+        else:
+            self.board[index] = value
 
 @dataclass(slots=True)
 class Board:
@@ -250,6 +274,7 @@ class Board:
             raise ValueError(f"No piece to move from {from_square.alg}")
 
         captured_piece = self.get_piece_at(to_square)
+        move.captured_piece = captured_piece
         if captured_piece is not None:
             self.remove_piece(captured_piece, to_square)
 
