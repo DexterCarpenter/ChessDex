@@ -446,6 +446,127 @@ def test_get_pawn_moves_promotion_capture_white():
     assert all(m.type == MoveType.PROMOTION for m in promo_moves)
 
 
+def _knight_targets(moves: list[Move], from_alg: str) -> set[str]:
+    return {m.to_square.alg for m in moves if m.from_square.alg == from_alg}
+
+
+def test_knight_moves_from_square_empty_returns_empty():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+    board.remove_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+
+    assert board._knight_moves_from_square(Sqr("e4")) == []
+
+
+def test_knight_moves_from_square_center_e4():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+
+    moves = board._knight_moves_from_square(Sqr("e4"))
+
+    assert _knight_targets(moves, "e4") == {
+        "c3",
+        "c5",
+        "d2",
+        "d6",
+        "f2",
+        "f6",
+        "g3",
+        "g5",
+    }
+    assert all(m.from_square.alg == "e4" for m in moves)
+    assert all(m.type == MoveType.NORMAL for m in moves)
+
+
+@pytest.mark.parametrize(
+    "from_alg, expected_targets",
+    [
+        ("a1", {"b3", "c2"}),
+        ("h8", {"f7", "g6"}),
+        ("a8", {"b6", "c7"}),
+    ],
+)
+def test_knight_moves_from_square_corners_no_wrap(from_alg, expected_targets):
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr(from_alg))
+
+    moves = board._knight_moves_from_square(Sqr(from_alg))
+
+    assert _knight_targets(moves, from_alg) == expected_targets
+
+
+def test_knight_moves_from_square_blocks_friendly_piece():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.ROOK), Sqr("f6"))
+
+    moves = board._knight_moves_from_square(Sqr("e4"))
+
+    assert "f6" not in _knight_targets(moves, "e4")
+    assert len(_knight_targets(moves, "e4")) == 7
+
+
+def test_knight_moves_from_square_allows_capture():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.ROOK), Sqr("f6"))
+
+    moves = board._knight_moves_from_square(Sqr("e4"))
+
+    assert ("e4", "f6") in _move_algs(moves)
+    capture = _find_move(moves, "e4", "f6")
+    assert capture is not None
+    assert capture.type == MoveType.NORMAL
+
+
+def test_get_knight_moves_starting_position_white():
+    board = Board()
+    board.setup_starting_position()
+
+    moves = _move_algs(board.get_knight_moves())
+
+    assert len(moves) == 4
+    assert ("b1", "a3") in moves
+    assert ("b1", "c3") in moves
+    assert ("g1", "f3") in moves
+    assert ("g1", "h3") in moves
+    assert ("b1", "d2") not in moves
+    assert ("g1", "f2") not in moves
+
+
+def test_get_knight_moves_only_current_side():
+    board = Board()
+    board.setup_starting_position()
+    board.whiteTurn = False
+
+    moves = board.get_knight_moves()
+
+    assert all(m.from_square.alg in {"b8", "g8"} for m in moves)
+    assert ("b8", "a6") in _move_algs(moves)
+    assert ("g8", "h6") in _move_algs(moves)
+
+
+def test_get_knight_moves_ignores_opponent_knights():
+    board = Board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KNIGHT), Sqr("c6"))
+    board.whiteTurn = True
+
+    moves = board.get_knight_moves()
+
+    assert _knight_targets(moves, "e4") == {
+        "c3",
+        "c5",
+        "d2",
+        "d6",
+        "f2",
+        "f6",
+        "g3",
+        "g5",
+    }
+    assert _knight_targets(moves, "c6") == set()
+
+
 @pytest.mark.parametrize("promo", PROMOTION_PIECES)
 def test_make_move_promotion_forward_white(promo):
     board = Board()

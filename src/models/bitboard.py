@@ -471,6 +471,55 @@ class Board:
         return moves
 
     # ------------------------
+    # Knight moves
+    # ------------------------
+
+    def _knight_moves_from_square(self, square: Sqr) -> list[Move]:
+        """Return pseudo-legal knight moves from the given square (empty or capture targets)."""
+        moves: list[Move] = []
+        idx = square.idx
+        file_idx = idx % 8
+        rank_idx = idx // 8
+
+        knight = self.get_piece_at(square)
+        if knight is None:
+            return moves
+
+        for delta in (-17, -15, -10, -6, 6, 10, 15, 17):
+            target_idx = idx + delta
+            if not 0 <= target_idx < 64:
+                continue
+
+            target_file = target_idx % 8
+            target_rank = target_idx // 8
+            if (abs(target_file - file_idx), abs(target_rank - rank_idx)) not in (
+                (1, 2),
+                (2, 1),
+            ):
+                continue
+
+            target_sq = Sqr(target_idx)
+            target_piece = self.get_piece_at(target_sq)
+            if target_piece is not None and target_piece.color == knight.color:
+                continue
+
+            moves.append(Move(square, target_sq))
+
+        return moves
+
+    def get_knight_moves(self) -> list[Move]:
+        """Get all possible moves for all knights of the color of the current turn."""
+        color = Color.WHITE if self.whiteTurn else Color.BLACK
+        moves: list[Move] = []
+        knight_bb = int(self.bitboards[(color, Piece.KNIGHT)])
+
+        for index in range(64):
+            if (knight_bb >> index) & 1:
+                moves.extend(self._knight_moves_from_square(Sqr(index)))
+
+        return moves
+
+    # ------------------------
     # Display
     # ------------------------
 
