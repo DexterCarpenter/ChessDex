@@ -5,6 +5,7 @@ from models.bitboard import (
     Board,
     ChessPiece,
     Color,
+    GameOutcome,
     Move,
     MoveLog,
     MoveType,
@@ -1527,3 +1528,90 @@ def test_move_history_san_restores_position():
     piece_after = board.get_piece_at(Sqr("d4"))
     assert piece_before == piece_after
     assert len(board.moveLog.moves) == 2
+
+
+def _play_king_shuffle(board: Board, *, cycles: int) -> None:
+    """Repeat Ke1-f1 / Ke8-f8 / Ke1 / Ke8 for the given number of full cycles."""
+    for _ in range(cycles):
+        board.make_move(_find_legal_move(board, "e1", "f1"))
+        board.make_move(_find_legal_move(board, "e8", "f8"))
+        board.make_move(_find_legal_move(board, "f1", "e1"))
+        board.make_move(_find_legal_move(board, "f8", "e8"))
+
+
+def _board_from_fen(fen: str) -> Board:
+    from chess_io.pgn import board_from_chess
+    import chess
+
+    return board_from_chess(chess.Board(fen))
+
+
+def test_is_checkmate():
+    board = Board()
+    board.setup_starting_position()
+    for from_alg, to_alg in (
+        ("e2", "e4"),
+        ("e7", "e5"),
+        ("f1", "c4"),
+        ("b8", "c6"),
+        ("d1", "h5"),
+        ("g8", "f6"),
+    ):
+        board.make_move(_find_legal_move(board, from_alg, to_alg))
+    board.make_move(_find_legal_move(board, "h5", "f7"))
+    assert board.is_checkmate()
+    assert board.game_outcome() == GameOutcome.CHECKMATE
+    assert board.is_game_over()
+
+
+def test_is_stalemate():
+    board = _board_from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1")
+    assert board.is_stalemate()
+    assert board.game_outcome() == GameOutcome.STALEMATE
+    assert board.is_game_over()
+    assert not board.is_checkmate()
+
+
+def test_is_threefold_repetition():
+    board = Board()
+    board.clear_board()
+    board.castling_rights = frozenset()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("e8"))
+    board.whiteTurn = True
+    assert not board.is_threefold_repetition()
+    _play_king_shuffle(board, cycles=1)
+    assert not board.is_threefold_repetition()
+    _play_king_shuffle(board, cycles=1)
+    assert board.is_threefold_repetition()
+    assert board.game_outcome() == GameOutcome.THREEFOLD_REPETITION
+    assert board.is_game_over()
+    assert board.get_all_legal_moves()
+
+
+def test_position_key_distinguishes_en_passant_rights():
+    board = Board()
+    board.clear_board()
+    board.castling_rights = frozenset()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.PAWN), Sqr("e5"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.PAWN), Sqr("d5"))
+    board.whiteTurn = True
+    without_ep = board._position_key()
+
+    board.ep_square = Sqr("d6")
+    with_ep = board._position_key()
+
+    assert without_ep != with_ep
+
+
+def test_threefold_repetition_distinguishes_castling_rights():
+    board = Board()
+    board.clear_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("e8"))
+    board.whiteTurn = True
+    start_key = board._position_key()
+    _play_king_shuffle(board, cycles=2)
+    assert board._position_key() != start_key
+    assert board._repetition_count() == 2
+    assert not board.is_threefold_repetition()
