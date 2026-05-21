@@ -1,9 +1,13 @@
+import threading
+
 from models.bitboard import (
     Board,
     Color,
     Move,
     Piece,
 )
+
+_engine_search_lock = threading.Lock()
 
 INF = 10_000
 MATE_SCORE = INF - 1
@@ -93,29 +97,30 @@ class Engine:
         Uses minimax() to score each root move. Returns None when there are no
         legal moves (checkmate or stalemate).
         """
-        legal_moves = board.get_all_legal_moves()
-        if not legal_moves:
-            return None
+        with _engine_search_lock:
+            legal_moves = board.get_all_legal_moves()
+            if not legal_moves:
+                return None
 
-        if board.whiteTurn:
-            best_value = -INF
+            if board.whiteTurn:
+                best_value = -INF
+                best_move = legal_moves[0]
+                for move in legal_moves:
+                    board.make_move(move)
+                    value = self.minimax(board, depth - 1)
+                    board.undo_move()
+                    if value > best_value:
+                        best_value = value
+                        best_move = move
+                return best_move
+
+            best_value = INF
             best_move = legal_moves[0]
             for move in legal_moves:
                 board.make_move(move)
                 value = self.minimax(board, depth - 1)
                 board.undo_move()
-                if value > best_value:
+                if value < best_value:
                     best_value = value
                     best_move = move
             return best_move
-
-        best_value = INF
-        best_move = legal_moves[0]
-        for move in legal_moves:
-            board.make_move(move)
-            value = self.minimax(board, depth - 1)
-            board.undo_move()
-            if value < best_value:
-                best_value = value
-                best_move = move
-        return best_move

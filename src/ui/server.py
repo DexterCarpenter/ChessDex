@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import sys
 import threading
 import time
 import uuid
@@ -61,13 +62,22 @@ def _get_entry(handler: BaseHTTPRequestHandler) -> _SessionEntry:
         return entry
 
 
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError)
+
+
 def _json_response(handler: BaseHTTPRequestHandler, status: int, body: dict) -> None:
+    if getattr(handler, "_chessdex_response_started", False):
+        return
     data = json.dumps(body).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(data)))
-    handler.end_headers()
-    handler.wfile.write(data)
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.end_headers()
+        handler._chessdex_response_started = True
+        handler.wfile.write(data)
+    except _CLIENT_GONE:
+        pass
 
 
 def _read_json(handler: BaseHTTPRequestHandler) -> dict:
@@ -90,11 +100,15 @@ def _serve_file(handler: BaseHTTPRequestHandler, base_dir: Path, rel: str) -> No
         return
     content = file_path.read_bytes()
     mime, _ = mimetypes.guess_type(str(file_path))
-    handler.send_response(HTTPStatus.OK)
-    handler.send_header("Content-Type", mime or "application/octet-stream")
-    handler.send_header("Content-Length", str(len(content)))
-    handler.end_headers()
-    handler.wfile.write(content)
+    try:
+        handler.send_response(HTTPStatus.OK)
+        handler.send_header("Content-Type", mime or "application/octet-stream")
+        handler.send_header("Content-Length", str(len(content)))
+        handler.end_headers()
+        handler._chessdex_response_started = True
+        handler.wfile.write(content)
+    except _CLIENT_GONE:
+        pass
 
 
 class PlayUIHandler(BaseHTTPRequestHandler):
@@ -104,6 +118,11 @@ class PlayUIHandler(BaseHTTPRequestHandler):
         pass
 
     def _handle_api_error(self, exc: Exception) -> None:
+        if isinstance(exc, _CLIENT_GONE):
+            return
+        if getattr(self, "_chessdex_response_started", False):
+            return
+        print(f"API error: {exc!r}", file=sys.stderr)
         _json_response(
             self,
             HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -113,6 +132,9 @@ class PlayUIHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path.startswith("/api/"):
+            if path == "/api/state" and not self.headers.get(SESSION_HEADER, "").strip():
+                _json_response(self, HTTPStatus.OK, {"ok": True})
+                return
             try:
                 entry = _get_entry(self)
                 with entry.lock:
@@ -135,6 +157,8 @@ class PlayUIHandler(BaseHTTPRequestHandler):
                     _json_response(
                         self, HTTPStatus.NOT_FOUND, {"error": "Not found"}
                     )
+            except _CLIENT_GONE:
+                pass
             except Exception as exc:
                 self._handle_api_error(exc)
             return
@@ -251,6 +275,8 @@ class PlayUIHandler(BaseHTTPRequestHandler):
                     return
 
                 _json_response(self, HTTPStatus.NOT_FOUND, {"error": "Not found"})
+        except _CLIENT_GONE:
+            pass
         except Exception as exc:
             self._handle_api_error(exc)
 
