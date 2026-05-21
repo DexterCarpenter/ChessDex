@@ -2,6 +2,18 @@
  * ChessDex play UI — talks to /api/* (same contract a future web app could use).
  */
 
+const SESSION_KEY = "chessdex_session_id";
+const SESSION_HEADER = "X-Session-Id";
+
+const PIECE_TYPE_NAMES = {
+  king: "King",
+  queen: "Queen",
+  rook: "Rook",
+  bishop: "Bishop",
+  knight: "Knight",
+  pawn: "Pawn",
+};
+
 const boardEl = document.getElementById("board");
 const statusEl = document.getElementById("status");
 const moveListEl = document.getElementById("move-list");
@@ -15,12 +27,47 @@ let selectedSq = null;
 let pendingPromo = null;
 let autoTimer = null;
 
+function getSessionId() {
+  let id = localStorage.getItem(SESSION_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(SESSION_KEY, id);
+  }
+  return id;
+}
+
+function pieceAssetUrl(piece) {
+  const color = piece.color === "white" ? "White" : "Black";
+  const type = PIECE_TYPE_NAMES[piece.type];
+  return `/assets/${color}${type}.svg`;
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  const data = await res.json();
+  const headers = {
+    "Content-Type": "application/json",
+    [SESSION_HEADER]: getSessionId(),
+    ...options.headers,
+  };
+  const res = await fetch(path, { ...options, headers });
+  const text = await res.text();
+  if (!text) {
+    throw new Error(
+      res.ok
+        ? "Server returned no response"
+        : `Server error (${res.status}) — try again or lower engine depth`
+    );
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    const preview = text.slice(0, 200);
+    throw new Error(
+      res.ok
+        ? "Invalid JSON from server"
+        : `Server error (${res.status}): ${preview}`
+    );
+  }
   if (!res.ok && !data.state) {
     throw new Error(data.error || res.statusText);
   }
@@ -31,13 +78,28 @@ function currentMode() {
   return document.querySelector('input[name="mode"]:checked')?.value;
 }
 
-function applyState(s) {
+async function refreshEngineHint() {
+  if (!state?.show_engine_hint) return;
+  try {
+    const data = await api("/api/state");
+    state.engine_hint = data.engine_hint;
+    renderBoard();
+    renderStatus();
+  } catch {
+    /* hint refresh is best-effort */
+  }
+}
+
+function applyState(s, { refreshHint = false } = {}) {
   state = s;
   renderBoard();
   renderStatus();
   renderHistory();
   syncControls();
   maybeAutoEngine();
+  if (refreshHint) {
+    refreshEngineHint();
+  }
 }
 
 function syncControls() {
@@ -113,10 +175,19 @@ function renderBoard() {
     el.type = "button";
     el.className = squareClasses(sq).join(" ");
     el.dataset.sq = sq.sq;
-    el.setAttribute("aria-label", sq.sq);
     if (sq.piece) {
-      el.textContent = sq.piece.symbol;
+      const img = document.createElement("img");
+      img.className = "piece-img";
+      img.src = pieceAssetUrl(sq.piece);
+      img.alt = `${sq.piece.color} ${sq.piece.type}`;
+      el.appendChild(img);
       el.classList.add("has-piece");
+      el.setAttribute(
+        "aria-label",
+        `${sq.piece.color} ${sq.piece.type} on ${sq.sq}`
+      );
+    } else {
+      el.setAttribute("aria-label", sq.sq);
     }
     if (!state.can_human_move || state.status) {
       el.disabled = true;
@@ -131,13 +202,19 @@ function renderBoard() {
 }
 
 async function highlightLegalTargets(from) {
-  const { moves } = await api(`/api/legal_moves?sq=${encodeURIComponent(from)}`);
-  const targets = new Set(moves.map((m) => m.to));
-  boardEl.querySelectorAll(".square").forEach((el) => {
-    if (targets.has(el.dataset.sq)) {
-      el.classList.add("legal-target");
-    }
-  });
+  try {
+    const { moves } = await api(
+      `/api/legal_moves?sq=${encodeURIComponent(from)}`
+    );
+    const targets = new Set(moves.map((m) => m.to));
+    boardEl.querySelectorAll(".square").forEach((el) => {
+      if (targets.has(el.dataset.sq)) {
+        el.classList.add("legal-target");
+      }
+    });
+  } catch (err) {
+    statusEl.textContent = err.message;
+  }
 }
 
 async function onSquareClick(alg) {
@@ -148,7 +225,8 @@ async function onSquareClick(alg) {
     if (!sq?.piece) return;
     const humanColor = state.mode === "human_black" ? "black" : "white";
     if (state.mode !== "human_human" && sq.piece.color !== humanColor) return;
-    if (state.mode === "human_human" && sq.piece.color !== state.side_to_move) return;
+    if (state.mode === "human_human" && sq.piece.color !== state.side_to_move)
+      return;
     selectedSq = alg;
     renderBoard();
     return;
@@ -183,7 +261,7 @@ async function submitMove(from, to, promotion) {
     pendingPromo = null;
     promoBar.classList.add("hidden");
     selectedSq = null;
-    if (data.state) applyState(data.state);
+    if (data.state) applyState(data.state, { refreshHint: true });
   } catch (err) {
     statusEl.textContent = err.message;
     selectedSq = null;
@@ -206,7 +284,7 @@ function maybeAutoEngine() {
 async function engineStep() {
   try {
     const data = await api("/api/engine_step", { method: "POST", body: "{}" });
-    if (data.state) applyState(data.state);
+    if (data.state) applyState(data.state, { refreshHint: true });
   } catch (err) {
     statusEl.textContent = err.message;
   }
@@ -226,7 +304,7 @@ async function newGame() {
       show_engine_hint: document.getElementById("show-hint").checked,
     }),
   });
-  applyState(data);
+  applyState(data, { refreshHint: true });
   selectedSq = null;
   pendingPromo = null;
   promoBar.classList.add("hidden");
@@ -237,13 +315,13 @@ async function updateConfig(patch) {
     method: "POST",
     body: JSON.stringify(patch),
   });
-  applyState(data);
+  applyState(data, { refreshHint: true });
 }
 
 document.getElementById("btn-new").addEventListener("click", newGame);
 document.getElementById("btn-undo").addEventListener("click", async () => {
   const data = await api("/api/undo", { method: "POST", body: "{}" });
-  if (data.state) applyState(data.state);
+  if (data.state) applyState(data.state, { refreshHint: true });
   selectedSq = null;
 });
 btnStep.addEventListener("click", engineStep);

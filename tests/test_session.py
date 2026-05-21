@@ -32,6 +32,11 @@ def test_engine_hint_when_enabled(session: PlaySession):
     assert "from" in hint and "to" in hint and "san" in hint
 
 
+def test_to_state_skips_hint_when_disabled(session: PlaySession):
+    session.show_engine_hint = True
+    assert session.to_state(include_hint=False)["engine_hint"] is None
+
+
 def test_engine_engine_step(session: PlaySession):
     session.mode = PlayMode.ENGINE_ENGINE
     session.new_game()

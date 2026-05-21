@@ -183,9 +183,17 @@ class PlaySession:
             if m.from_square.alg == sq_alg
         ]
 
-    def to_state(self) -> dict[str, object]:
+    def to_state(self, *, include_hint: bool = True) -> dict[str, object]:
         color = Color.WHITE if self.board.whiteTurn else Color.BLACK
         in_check = self.board._is_in_check(color)
+        hint = None
+        if include_hint:
+            hint = engine_hint(
+                self.board,
+                self.engine,
+                depth=self.engine_depth,
+                enabled=self.show_engine_hint,
+            )
         return {
             "mode": self.mode.value,
             "engine_depth": self.engine_depth,
@@ -200,11 +208,6 @@ class PlaySession:
             "squares": board_squares(self.board),
             "move_history": self.board.move_history_san(),
             "last_move": self._last_move_api(),
-            "engine_hint": engine_hint(
-                self.board,
-                self.engine,
-                depth=self.engine_depth,
-                enabled=self.show_engine_hint,
-            ),
+            "engine_hint": hint,
             "flip_board": self.mode == PlayMode.HUMAN_BLACK,
         }
