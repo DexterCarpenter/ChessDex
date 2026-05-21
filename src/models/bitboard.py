@@ -1,17 +1,71 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 from typing import TextIO
 
-from gmpy2 import mpz
-
 # ------------------------------------------------
 # Constants and Enums
 # ------------------------------------------------
 
-MASK_64 = (1 << 64) - 1 # A mask to ensure we only use the lower 64 bits for our bitboard representation
+MASK_64 = (1 << 64) - 1  # lower 64 bits for bitboard representation
+NOT_FILE_A = MASK_64 & ~0x0101010101010101
+NOT_FILE_H = MASK_64 & ~0x8080808080808080
+
+_BISHOP_DIRS = ((1, 1), (-1, 1), (1, -1), (-1, -1))
+_ROOK_DIRS = ((1, 0), (-1, 0), (0, 1), (0, -1))
+_KNIGHT_DELTAS = (-17, -15, -10, -6, 6, 10, 15, 17)
+_KING_DELTAS = (
+    (1, 0),
+    (-1, 0),
+    (0, 1),
+    (0, -1),
+    (1, 1),
+    (-1, 1),
+    (1, -1),
+    (-1, -1),
+)
+
+
+def _build_knight_attack_table() -> list[int]:
+    table: list[int] = []
+    for idx in range(64):
+        file_idx = idx % 8
+        rank_idx = idx // 8
+        attacks = 0
+        for delta in _KNIGHT_DELTAS:
+            target = idx + delta
+            if not 0 <= target < 64:
+                continue
+            if (abs(target % 8 - file_idx), abs(target // 8 - rank_idx)) not in (
+                (1, 2),
+                (2, 1),
+            ):
+                continue
+            attacks |= 1 << target
+        table.append(attacks)
+    return table
+
+
+def _build_king_attack_table() -> list[int]:
+    table: list[int] = []
+    for idx in range(64):
+        file_idx = idx % 8
+        rank_idx = idx // 8
+        attacks = 0
+        for df, dr in _KING_DELTAS:
+            f = file_idx + df
+            r = rank_idx + dr
+            if 0 <= f < 8 and 0 <= r < 8:
+                attacks |= 1 << (r * 8 + f)
+        table.append(attacks)
+    return table
+
+
+KNIGHT_ATTACKS = _build_knight_attack_table()
+KING_ATTACKS = _build_king_attack_table()
 
 FILES = "abcdefgh" # define the files (columns) of the chessboard
 RANKS = "12345678" # define the ranks (rows) of the chessboard
@@ -33,6 +87,28 @@ class Piece(Enum):
 COLOR_LIST = list(Color) # A list of all colors for easy iteration when initializing the bitboards
 PIECE_LIST = list(Piece) # A list of all piece types for easy iteration when initializing the bitboards
 PROMOTION_PIECES = (Piece.QUEEN, Piece.ROOK, Piece.BISHOP, Piece.KNIGHT)
+
+MATERIAL_BY_PIECE = {
+    Piece.PAWN: 1,
+    Piece.KNIGHT: 3,
+    Piece.BISHOP: 3,
+    Piece.ROOK: 5,
+    Piece.QUEEN: 9,
+    Piece.KING: 0,
+}
+
+
+def _init_zobrist_tables() -> tuple[dict[tuple[Color, Piece], list[int]], int]:
+    rng = random.Random(0xC0FFEE)
+    piece_keys: dict[tuple[Color, Piece], list[int]] = {}
+    for color in Color:
+        for piece in Piece:
+            piece_keys[(color, piece)] = [rng.getrandbits(64) for _ in range(64)]
+    side_key = rng.getrandbits(64)
+    return piece_keys, side_key
+
+
+ZOBRIST_PIECE, ZOBRIST_SIDE = _init_zobrist_tables()
 
 PIECE_SAN_LETTER = {
     Piece.KING: "K",
@@ -222,9 +298,9 @@ class Board:
 
     Each piece type for both colors is represented by a separate 64-bit integer (bitboard).
     """
-    bitboards: dict[tuple[Color, Piece], mpz] = field(
+    bitboards: dict[tuple[Color, Piece], int] = field(
         default_factory=lambda: {
-            (color, piece): mpz(0)
+            (color, piece): 0
             for color in COLOR_LIST
             for piece in PIECE_LIST
         }
@@ -234,56 +310,127 @@ class Board:
     moveLog: MoveLog = field(default_factory=MoveLog)
     castling_rights: frozenset[str] | None = None
     ep_square: Sqr | None = None
+    piece_at: list[ChessPiece | None] = field(default_factory=lambda: [None] * 64)
+    white_occupancy: int = 0
+    black_occupancy: int = 0
+    material_score: float = 0.0
+    king_square: dict[Color, int | None] = field(
+        default_factory=lambda: {Color.WHITE: None, Color.BLACK: None}
+    )
+    zobrist_hash: int = 0
 
     def __post_init__(self):
         for key in self.bitboards:
             self.bitboards[key] &= MASK_64
+        if any(self.bitboards.values()):
+            self._rebuild_aux_state()
 
     # ------------------------
     # Basic piece operations
     # ------------------------
 
+    def _material_delta(self, piece: ChessPiece, *, add: bool) -> float:
+        value = MATERIAL_BY_PIECE[piece.name]
+        if value == 0:
+            return 0.0
+        sign = 1.0 if piece.color == Color.WHITE else -1.0
+        return sign * value if add else -sign * value
+
+    def _set_occupancy_bit(self, color: Color, idx: int, *, occupied: bool) -> None:
+        mask = 1 << idx
+        if color == Color.WHITE:
+            if occupied:
+                self.white_occupancy |= mask
+            else:
+                self.white_occupancy &= ~mask
+        elif occupied:
+            self.black_occupancy |= mask
+        else:
+            self.black_occupancy &= ~mask
+
+    def _recompute_zobrist(self) -> None:
+        h = ZOBRIST_SIDE if self.whiteTurn else 0
+        for idx, cp in enumerate(self.piece_at):
+            if cp is not None:
+                h ^= ZOBRIST_PIECE[(cp.color, cp.name)][idx]
+        self.zobrist_hash = h & MASK_64
+
+    def _rebuild_aux_state(self) -> None:
+        """Rebuild piece_at, occupancy, material, and king_square from bitboards."""
+        self.piece_at = [None] * 64
+        self.white_occupancy = 0
+        self.black_occupancy = 0
+        self.material_score = 0.0
+        self.king_square = {Color.WHITE: None, Color.BLACK: None}
+        for color in COLOR_LIST:
+            for piece in PIECE_LIST:
+                bb = self.bitboards[(color, piece)]
+                for index in range(64):
+                    if (bb >> index) & 1:
+                        cp = ChessPiece(color=color, name=piece)
+                        self.piece_at[index] = cp
+                        self._set_occupancy_bit(color, index, occupied=True)
+                        self.material_score += self._material_delta(cp, add=True)
+                        if piece == Piece.KING:
+                            self.king_square[color] = index
+        self._recompute_zobrist()
+
     def place_piece(self, piece: ChessPiece, square: Sqr) -> None:
         """Set the given piece bitboard at the given index to 1."""
         valid_index(square.idx)
+        idx = square.idx
+        existing = self.piece_at[idx]
+        if existing is not None:
+            self.remove_piece(existing, square)
 
         key = (piece.color, piece.name)
-        value = self.bitboards[key]
-        self.bitboards[key] = mpz(value | (mpz(1) << square.idx)) & MASK_64
-    
+        self.bitboards[key] = (self.bitboards[key] | (1 << idx)) & MASK_64
+        self.piece_at[idx] = piece
+        self._set_occupancy_bit(piece.color, idx, occupied=True)
+        self.material_score += self._material_delta(piece, add=True)
+        self.zobrist_hash ^= ZOBRIST_PIECE[(piece.color, piece.name)][idx]
+        if piece.name == Piece.KING:
+            self.king_square[piece.color] = idx
+
     def remove_piece(self, piece: ChessPiece, square: Sqr) -> None:
         """Set the given piece bitboard at the given index to 0."""
         valid_index(square.idx)
+        idx = square.idx
 
         key = (piece.color, piece.name)
-        value = self.bitboards[key]
-        self.bitboards[key] = mpz(value & ~(mpz(1) << square.idx)) & MASK_64
+        self.bitboards[key] = (self.bitboards[key] & ~(1 << idx)) & MASK_64
+        self.piece_at[idx] = None
+        self._set_occupancy_bit(piece.color, idx, occupied=False)
+        self.material_score += self._material_delta(piece, add=False)
+        self.zobrist_hash ^= ZOBRIST_PIECE[(piece.color, piece.name)][idx]
+        if piece.name == Piece.KING and self.king_square[piece.color] == idx:
+            self.king_square[piece.color] = None
 
     def clear_pieces(self, piece: ChessPiece) -> None:
         """Set all bits in the given colored piece bitboard to 0."""
-        key = (piece.color, piece.name)
-        if key in self.bitboards:
-            self.bitboards[key] = mpz(0)
+        bb = self.bitboards[(piece.color, piece.name)]
+        while bb:
+            idx = (bb & -bb).bit_length() - 1
+            self.remove_piece(piece, Sqr(idx))
+            bb &= bb - 1
 
     def clear_board(self) -> None:
         """Set all bits in all piece bitboards to 0."""
         for key in self.bitboards:
-            self.bitboards[key] = mpz(0)
+            self.bitboards[key] = 0
+        self.piece_at = [None] * 64
+        self.white_occupancy = 0
+        self.black_occupancy = 0
+        self.material_score = 0.0
+        self.king_square = {Color.WHITE: None, Color.BLACK: None}
         self.moveLog.clear()
         self.castling_rights = None
         self.ep_square = None
+        self.zobrist_hash = 0
 
     def get_piece_at(self, square: Sqr) -> ChessPiece | None:
         """Return the piece at the given square, or None if the square is empty."""
-        index = square.idx
-
-        for color in COLOR_LIST:
-            for piece in PIECE_LIST:
-                bitboard = self.bitboards[(color, piece)]
-                if (bitboard >> index) & 1:
-                    return ChessPiece(color=color, name=piece)
-
-        return None
+        return self.piece_at[square.idx]
 
     # ------------------------
     # Board Initialization
@@ -293,22 +440,23 @@ class Board:
         """Set up the board with the standard starting position."""
         self.clear_board()
 
-        self.bitboards[(Color.WHITE, Piece.PAWN)]   = mpz(0x000000000000FF00)
-        self.bitboards[(Color.WHITE, Piece.KNIGHT)] = mpz(0x0000000000000042)
-        self.bitboards[(Color.WHITE, Piece.BISHOP)] = mpz(0x0000000000000024)
-        self.bitboards[(Color.WHITE, Piece.ROOK)]   = mpz(0x0000000000000081)
-        self.bitboards[(Color.WHITE, Piece.QUEEN)]  = mpz(0x0000000000000008)
-        self.bitboards[(Color.WHITE, Piece.KING)]   = mpz(0x0000000000000010)
-        self.bitboards[(Color.BLACK, Piece.PAWN)]   = mpz(0x00FF000000000000)
-        self.bitboards[(Color.BLACK, Piece.KNIGHT)] = mpz(0x4200000000000000)
-        self.bitboards[(Color.BLACK, Piece.BISHOP)] = mpz(0x2400000000000000)
-        self.bitboards[(Color.BLACK, Piece.ROOK)]   = mpz(0x8100000000000000)
-        self.bitboards[(Color.BLACK, Piece.QUEEN)]  = mpz(0x0800000000000000)
-        self.bitboards[(Color.BLACK, Piece.KING)]   = mpz(0x1000000000000000)
+        self.bitboards[(Color.WHITE, Piece.PAWN)] = 0x000000000000FF00
+        self.bitboards[(Color.WHITE, Piece.KNIGHT)] = 0x0000000000000042
+        self.bitboards[(Color.WHITE, Piece.BISHOP)] = 0x0000000000000024
+        self.bitboards[(Color.WHITE, Piece.ROOK)] = 0x0000000000000081
+        self.bitboards[(Color.WHITE, Piece.QUEEN)] = 0x0000000000000008
+        self.bitboards[(Color.WHITE, Piece.KING)] = 0x0000000000000010
+        self.bitboards[(Color.BLACK, Piece.PAWN)] = 0x00FF000000000000
+        self.bitboards[(Color.BLACK, Piece.KNIGHT)] = 0x4200000000000000
+        self.bitboards[(Color.BLACK, Piece.BISHOP)] = 0x2400000000000000
+        self.bitboards[(Color.BLACK, Piece.ROOK)] = 0x8100000000000000
+        self.bitboards[(Color.BLACK, Piece.QUEEN)] = 0x0800000000000000
+        self.bitboards[(Color.BLACK, Piece.KING)] = 0x1000000000000000
 
         self.whiteTurn = True
         self.castling_rights = None
         self.ep_square = None
+        self._rebuild_aux_state()
 
     # ------------------------
     # Moves
@@ -383,6 +531,7 @@ class Board:
             self.place_piece(rook, rook_to)
 
         self.whiteTurn = not self.whiteTurn
+        self.zobrist_hash ^= ZOBRIST_SIDE
         self.moveLog.append(move)
 
     def undo_move(self) -> None:
@@ -432,6 +581,7 @@ class Board:
                 self.place_piece(move.captured_piece, to_square)
 
         self.whiteTurn = not self.whiteTurn
+        self.zobrist_hash ^= ZOBRIST_SIDE
 
     def _opponent(self, color: Color) -> Color:
         """Return the opponent color."""
@@ -731,57 +881,6 @@ class Board:
             return Sqr(_BLACK_ROOK_KINGSIDE_START), Sqr(61)
         return Sqr(_BLACK_ROOK_QUEENSIDE_START), Sqr(59)
 
-    def _king_attack_square_indices(self, by_color: Color) -> set[int]:
-        """Return squares attacked by the given color's king (its eight neighbors)."""
-        king_sq = self._find_king_square(by_color)
-        if king_sq is None:
-            return set()
-
-        file_idx = king_sq.idx % 8
-        rank_idx = king_sq.idx // 8
-        attacked: set[int] = set()
-        for file_step, rank_step in (
-            (1, 0),
-            (-1, 0),
-            (0, 1),
-            (0, -1),
-            (1, 1),
-            (-1, 1),
-            (1, -1),
-            (-1, -1),
-        ):
-            f = file_idx + file_step
-            r = rank_idx + rank_step
-            if 0 <= f < 8 and 0 <= r < 8:
-                attacked.add(r * 8 + f)
-        return attacked
-
-    def _attacked_square_indices(self, by_color: Color) -> set[int]:
-        """Return all squares attacked by the given color."""
-        was_white = self.whiteTurn
-        self.whiteTurn = by_color == Color.WHITE
-        try:
-            attacked: set[int] = set()
-            for move in self.get_pawn_moves():
-                # Pawns attack diagonally only; forward/double pushes are not attacks.
-                if abs(move.from_square.idx % 8 - move.to_square.idx % 8) == 1:
-                    attacked.add(move.to_square.idx)
-            for move in self.get_knight_moves():
-                attacked.add(move.to_square.idx)
-            for move in self.get_bishop_moves():
-                attacked.add(move.to_square.idx)
-            for move in self.get_rook_moves():
-                attacked.add(move.to_square.idx)
-            for move in self.get_queen_moves():
-                attacked.add(move.to_square.idx)
-            attacked.update(self._king_attack_square_indices(by_color))
-            return attacked
-        finally:
-            self.whiteTurn = was_white
-
-    def _is_square_attacked(self, square: Sqr, by_color: Color) -> bool:
-        return square.idx in self._attacked_square_indices(by_color)
-
     def _king_on_start_square(self, color: Color) -> bool:
         king_sq = Sqr(_king_start_index(color))
         piece = self.get_piece_at(king_sq)
@@ -797,10 +896,12 @@ class Board:
         return all(self.get_piece_at(Sqr(idx)) is None for idx in indices)
 
     def _castle_path_safe(
-        self, color: Color, *, kingside: bool
+        self, color: Color, *, kingside: bool, opponent_attacks: int | None = None
     ) -> bool:
         """King not in check and does not pass through or land on attacked squares."""
         opponent = self._opponent(color)
+        if opponent_attacks is None:
+            opponent_attacks = self._attack_bitboard(opponent)
         if kingside:
             if color == Color.WHITE:
                 safe_indices = (_WHITE_KING_START, 5, 6)
@@ -811,11 +912,11 @@ class Board:
         else:
             safe_indices = (_BLACK_KING_START, 59, 58)
 
-        return all(
-            not self._is_square_attacked(Sqr(idx), opponent) for idx in safe_indices
-        )
+        return all(not (opponent_attacks & (1 << idx)) for idx in safe_indices)
 
-    def _can_castle_kingside(self, color: Color) -> bool:
+    def _can_castle_kingside(
+        self, color: Color, opponent_attacks: int | None = None
+    ) -> bool:
         if not self._has_castling_rights(color, kingside=True):
             return False
         if not self._king_on_start_square(color):
@@ -827,9 +928,11 @@ class Board:
                 return False
         elif not self._squares_empty((61, 62)):
             return False
-        return self._castle_path_safe(color, kingside=True)
+        return self._castle_path_safe(color, kingside=True, opponent_attacks=opponent_attacks)
 
-    def _can_castle_queenside(self, color: Color) -> bool:
+    def _can_castle_queenside(
+        self, color: Color, opponent_attacks: int | None = None
+    ) -> bool:
         if not self._has_castling_rights(color, kingside=False):
             return False
         if not self._king_on_start_square(color):
@@ -841,9 +944,11 @@ class Board:
                 return False
         elif not self._squares_empty((57, 58, 59)):
             return False
-        return self._castle_path_safe(color, kingside=False)
+        return self._castle_path_safe(color, kingside=False, opponent_attacks=opponent_attacks)
 
-    def _king_moves_from_square(self, square: Sqr) -> list[Move]:
+    def _king_moves_from_square(
+        self, square: Sqr, opponent_attacks: int | None = None
+    ) -> list[Move]:
         """Return pseudo-legal king moves (one step and castling) from the given square."""
         moves: list[Move] = []
         king = self.get_piece_at(square)
@@ -852,6 +957,8 @@ class Board:
 
         color = king.color
         opponent = self._opponent(color)
+        if opponent_attacks is None:
+            opponent_attacks = self._attack_bitboard(opponent)
         file_idx = square.idx % 8
         rank_idx = square.idx // 8
 
@@ -873,31 +980,29 @@ class Board:
             target_piece = self.get_piece_at(target_sq)
             if target_piece is not None and target_piece.color == color:
                 continue
-            if self._is_square_attacked(target_sq, opponent):
+            if opponent_attacks & (1 << target_sq.idx):
                 continue
             moves.append(Move(square, target_sq))
 
         if square.idx == _king_start_index(color):
-            if self._can_castle_kingside(color):
+            if self._can_castle_kingside(color, opponent_attacks):
                 move = Move(square, Sqr(6 if color == Color.WHITE else 62))
                 move.type = MoveType.CASTLE
                 moves.append(move)
-            if self._can_castle_queenside(color):
+            if self._can_castle_queenside(color, opponent_attacks):
                 move = Move(square, Sqr(2 if color == Color.WHITE else 58))
                 move.type = MoveType.CASTLE
                 moves.append(move)
 
         return moves
 
-    def get_king_moves(self) -> list[Move]:
+    def get_king_moves(self, opponent_attacks: int | None = None) -> list[Move]:
         """Get all possible moves for the king of the color of the current turn."""
         color = Color.WHITE if self.whiteTurn else Color.BLACK
         moves: list[Move] = []
-        king_bb = int(self.bitboards[(color, Piece.KING)])
-
-        for index in range(64):
-            if (king_bb >> index) & 1:
-                moves.extend(self._king_moves_from_square(Sqr(index)))
+        king_idx = self.king_square[color]
+        if king_idx is not None:
+            moves.extend(self._king_moves_from_square(Sqr(king_idx), opponent_attacks))
 
         return moves
 
@@ -905,22 +1010,92 @@ class Board:
     # Get all Legal Moves
     # ------------------------
 
+    def _occupancy(self) -> int:
+        return (self.white_occupancy | self.black_occupancy) & MASK_64
+
+    def _ray_attacks(self, from_idx: int, directions: tuple[tuple[int, int], ...], occupancy: int) -> int:
+        attacks = 0
+        file_idx = from_idx % 8
+        rank_idx = from_idx // 8
+        for file_step, rank_step in directions:
+            f = file_idx + file_step
+            r = rank_idx + rank_step
+            while 0 <= f < 8 and 0 <= r < 8:
+                sq = r * 8 + f
+                attacks |= 1 << sq
+                if occupancy & (1 << sq):
+                    break
+                f += file_step
+                r += rank_step
+        return attacks
+
+    def _pawn_attack_bitboard(self, by_color: Color) -> int:
+        bb = self.bitboards[(by_color, Piece.PAWN)]
+        if by_color == Color.WHITE:
+            return (((bb & NOT_FILE_A) << 7) | ((bb & NOT_FILE_H) << 9)) & MASK_64
+        return (((bb & NOT_FILE_A) >> 7) | ((bb & NOT_FILE_H) >> 9)) & MASK_64
+
+    def _slider_attack_bitboard(
+        self, by_color: Color, pieces: tuple[Piece, ...], directions: tuple[tuple[int, int], ...]
+    ) -> int:
+        occupancy = self._occupancy()
+        attacks = 0
+        for piece in pieces:
+            bb = self.bitboards[(by_color, piece)]
+            while bb:
+                idx = (bb & -bb).bit_length() - 1
+                attacks |= self._ray_attacks(idx, directions, occupancy)
+                bb &= bb - 1
+        return attacks & MASK_64
+
+    def _attack_bitboard(self, by_color: Color) -> int:
+        """Return a bitboard of all squares attacked by the given color."""
+        attacks = self._pawn_attack_bitboard(by_color)
+
+        knight_bb = self.bitboards[(by_color, Piece.KNIGHT)]
+        while knight_bb:
+            idx = (knight_bb & -knight_bb).bit_length() - 1
+            attacks |= KNIGHT_ATTACKS[idx]
+            knight_bb &= knight_bb - 1
+
+        attacks |= self._slider_attack_bitboard(
+            by_color, (Piece.BISHOP, Piece.QUEEN), _BISHOP_DIRS
+        )
+        attacks |= self._slider_attack_bitboard(
+            by_color, (Piece.ROOK, Piece.QUEEN), _ROOK_DIRS
+        )
+
+        king_idx = self.king_square[by_color]
+        if king_idx is not None:
+            attacks |= KING_ATTACKS[king_idx]
+
+        return attacks & MASK_64
+
     def _find_king_square(self, color: Color) -> Sqr | None:
         """Return the square of the given color's king, or None if absent."""
-        king_bb = int(self.bitboards[(color, Piece.KING)])
-        for index in range(64):
-            if (king_bb >> index) & 1:
-                return Sqr(index)
-        return None
+        idx = self.king_square[color]
+        if idx is None:
+            return None
+        return Sqr(idx)
 
-    def _is_in_check(self, color: Color) -> bool:
+    def _is_square_attacked(
+        self, square: Sqr, by_color: Color, attacks: int | None = None
+    ) -> bool:
+        if attacks is None:
+            attacks = self._attack_bitboard(by_color)
+        return bool(attacks & (1 << square.idx))
+
+    def _is_in_check(self, color: Color, opponent_attacks: int | None = None) -> bool:
         """Return True if the given color's king is attacked by the opponent."""
         king_sq = self._find_king_square(color)
         if king_sq is None:
             return False
-        return self._is_square_attacked(king_sq, self._opponent(color))
+        opponent = self._opponent(color)
+        if opponent_attacks is None:
+            opponent_attacks = self._attack_bitboard(opponent)
+        return bool(opponent_attacks & (1 << king_sq.idx))
 
-    def _get_all_moves(self) -> list[Move]:
+    def _get_all_moves(self, opponent_attacks: int | None = None) -> list[Move]:
         """Get all pseudo-legal moves for all pieces of the color of the current turn."""
         moves: list[Move] = []
         moves.extend(self.get_pawn_moves())
@@ -928,7 +1103,7 @@ class Board:
         moves.extend(self.get_bishop_moves())
         moves.extend(self.get_rook_moves())
         moves.extend(self.get_queen_moves())
-        moves.extend(self.get_king_moves())
+        moves.extend(self.get_king_moves(opponent_attacks))
         return moves
 
     def get_all_legal_moves(self) -> list[Move]:
@@ -938,11 +1113,16 @@ class Board:
         the moving side's king in check (pinned pieces, moving into check, etc.).
         """
         color = Color.WHITE if self.whiteTurn else Color.BLACK
+        opponent = self._opponent(color)
+        opponent_attacks = self._attack_bitboard(opponent)
         legal: list[Move] = []
 
-        for move in self._get_all_moves():
+        for move in self._get_all_moves(opponent_attacks):
             self.make_move(move)
-            if not self._is_in_check(color):
+            king_idx = self.king_square[color]
+            if king_idx is None or not (
+                self._attack_bitboard(opponent) & (1 << king_idx)
+            ):
                 move.isLegal = True
                 legal.append(move)
             else:

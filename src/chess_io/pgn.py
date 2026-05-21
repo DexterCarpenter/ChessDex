@@ -90,6 +90,7 @@ def apply_board_state(target: Board, source: Board) -> None:
     target.whiteTurn = source.whiteTurn
     target.castling_rights = source.castling_rights
     target.ep_square = source.ep_square
+    target._rebuild_aux_state()
 
 
 def board_from_chess(cb: chess.Board) -> Board:
