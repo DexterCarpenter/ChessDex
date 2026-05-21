@@ -127,6 +127,17 @@ def test_get_best_move_restores_board(engine: Engine):
     assert board.whiteTurn
 
 
+def test_get_best_move_random_among_equal_scores(engine: Engine):
+    board = Board()
+    board.setup_starting_position()
+    seen: set[tuple[str, str]] = set()
+    for _ in range(40):
+        move = engine.get_best_move(board, 1)
+        assert move is not None
+        seen.add((move.from_square.alg, move.to_square.alg))
+    assert len(seen) > 1
+
+
 def test_get_best_move_returns_none_when_game_over(engine: Engine):
     board = _empty_board()
     board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("h8"))

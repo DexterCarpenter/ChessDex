@@ -1,3 +1,4 @@
+import random
 import threading
 
 from models.bitboard import (
@@ -104,23 +105,27 @@ class Engine:
 
             if board.whiteTurn:
                 best_value = -INF
-                best_move = legal_moves[0]
+                best_moves: list[Move] = []
                 for move in legal_moves:
                     board.make_move(move)
                     value = self.minimax(board, depth - 1)
                     board.undo_move()
                     if value > best_value:
                         best_value = value
-                        best_move = move
-                return best_move
+                        best_moves = [move]
+                    elif value == best_value:
+                        best_moves.append(move)
+                return random.choice(best_moves)
 
             best_value = INF
-            best_move = legal_moves[0]
+            best_moves = []
             for move in legal_moves:
                 board.make_move(move)
                 value = self.minimax(board, depth - 1)
                 board.undo_move()
                 if value < best_value:
                     best_value = value
-                    best_move = move
-            return best_move
+                    best_moves = [move]
+                elif value == best_value:
+                    best_moves.append(move)
+            return random.choice(best_moves)
