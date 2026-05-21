@@ -1551,6 +1551,16 @@ def _board_from_fen(fen: str) -> Board:
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def test_king_cannot_capture_piece_protected_only_by_opponent_king():
+    """Kings may not move adjacent to each other (e.g. Kxh6 with kings on h5/h7)."""
+    board = Board.from_pgn(FIXTURES / "king_protection.pgn")
+    assert ("h5", "h6") not in _move_algs(board.get_king_moves())
+
+    board.make_move(_find_legal_move(board, "f6", "h6"))
+    assert board.is_checkmate()
+    assert ("h7", "h6") not in _move_algs(board.get_king_moves())
+
+
 def test_pawn_double_push_destination_not_counted_as_attack():
     """A pawn's double-push target must not block the king from capturing there."""
     board = Board.from_pgn(FIXTURES / "pawn_doublepush_take.pgn")

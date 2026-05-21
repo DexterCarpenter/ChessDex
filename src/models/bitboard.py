@@ -731,8 +731,33 @@ class Board:
             return Sqr(_BLACK_ROOK_KINGSIDE_START), Sqr(61)
         return Sqr(_BLACK_ROOK_QUEENSIDE_START), Sqr(59)
 
+    def _king_attack_square_indices(self, by_color: Color) -> set[int]:
+        """Return squares attacked by the given color's king (its eight neighbors)."""
+        king_sq = self._find_king_square(by_color)
+        if king_sq is None:
+            return set()
+
+        file_idx = king_sq.idx % 8
+        rank_idx = king_sq.idx // 8
+        attacked: set[int] = set()
+        for file_step, rank_step in (
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (-1, 1),
+            (1, -1),
+            (-1, -1),
+        ):
+            f = file_idx + file_step
+            r = rank_idx + rank_step
+            if 0 <= f < 8 and 0 <= r < 8:
+                attacked.add(r * 8 + f)
+        return attacked
+
     def _attacked_square_indices(self, by_color: Color) -> set[int]:
-        """Return all squares attacked by the given color (excludes king moves)."""
+        """Return all squares attacked by the given color."""
         was_white = self.whiteTurn
         self.whiteTurn = by_color == Color.WHITE
         try:
@@ -749,6 +774,7 @@ class Board:
                 attacked.add(move.to_square.idx)
             for move in self.get_queen_moves():
                 attacked.add(move.to_square.idx)
+            attacked.update(self._king_attack_square_indices(by_color))
             return attacked
         finally:
             self.whiteTurn = was_white
