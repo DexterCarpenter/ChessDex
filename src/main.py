@@ -1,6 +1,6 @@
-"""Entry point; delegates to the interactive play loop."""
+"""Entry point; run the graphical play UI by default."""
 
-from play import main
+from play_ui import run_server
 
 if __name__ == "__main__":
-    main()
+    run_server()

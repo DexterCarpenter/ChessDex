@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChessDex Play</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>ChessDex</h1>
+    <p class="tagline">Prototype play UI — local API, web-ready layout</p>
+  </header>
+
+  <main>
+    <section class="board-panel">
+      <div id="status" class="status">Loading…</div>
+      <div id="board" class="board" aria-label="Chess board"></div>
+      <div id="promo-bar" class="promo-bar hidden">
+        <span>Promote to:</span>
+        <button type="button" data-promo="q">Queen</button>
+        <button type="button" data-promo="r">Rook</button>
+        <button type="button" data-promo="b">Bishop</button>
+        <button type="button" data-promo="n">Knight</button>
+        <button type="button" id="promo-cancel">Cancel</button>
+      </div>
+    </section>
+
+    <aside class="controls">
+      <fieldset>
+        <legend>Mode</legend>
+        <label><input type="radio" name="mode" value="human_human" /> Both human</label>
+        <label><input type="radio" name="mode" value="human_white" checked /> You White vs engine</label>
+        <label><input type="radio" name="mode" value="human_black" /> You Black vs engine</label>
+        <label><input type="radio" name="mode" value="engine_engine" /> Engine vs engine</label>
+      </fieldset>
+
+      <label class="row">
+        Engine depth
+        <input type="range" id="depth" min="1" max="6" value="3" />
+        <span id="depth-val">3</span>
+      </label>
+
+      <label class="row">
+        <input type="checkbox" id="show-hint" />
+        Show engine best move
+      </label>
+
+      <div class="buttons">
+        <button type="button" id="btn-new">New game</button>
+        <button type="button" id="btn-undo">Undo</button>
+        <button type="button" id="btn-step" class="hidden">Engine step</button>
+        <label class="row hidden" id="auto-wrap">
+          <input type="checkbox" id="auto-play" />
+          Auto-play (engine vs engine)
+        </label>
+      </div>
+
+      <section class="history">
+        <h2>Moves</h2>
+        <ol id="move-list"></ol>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
