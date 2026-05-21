@@ -34,6 +34,26 @@ class _SessionEntry:
 _sessions: dict[str, _SessionEntry] = {}
 _sessions_lock = threading.Lock()
 
+RESTART_TOKEN = os.environ.get("RESTART_TOKEN", "").strip()
+
+
+def _restart_authorized(handler: BaseHTTPRequestHandler) -> bool:
+    if not RESTART_TOKEN:
+        return True
+    return handler.headers.get("X-Restart-Token", "").strip() == RESTART_TOKEN
+
+
+def _schedule_process_restart() -> None:
+    """Exit after the HTTP response is sent so Render/Docker restarts the container."""
+
+    def _exit() -> None:
+        time.sleep(0.25)
+        with _sessions_lock:
+            _sessions.clear()
+        os._exit(0)
+
+    threading.Thread(target=_exit, daemon=True).start()
+
 
 def _prune_idle_sessions() -> None:
     cutoff = time.monotonic() - SESSION_IDLE_SECONDS
@@ -179,6 +199,22 @@ class PlayUIHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "Invalid JSON"})
             return
 
+        if path == "/api/restart":
+            if not _restart_authorized(self):
+                _json_response(
+                    self,
+                    HTTPStatus.FORBIDDEN,
+                    {"error": "Restart not authorized"},
+                )
+                return
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {"ok": True, "message": "Restarting service…"},
+            )
+            _schedule_process_restart()
+            return
+
         try:
             entry = _get_entry(self)
             with entry.lock:
@@ -212,7 +248,23 @@ class PlayUIHandler(BaseHTTPRequestHandler):
                         body.get("from", ""),
                         body.get("to", ""),
                         body.get("promotion"),
+                        run_engine=False,
                     )
+                    status = (
+                        HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+                    )
+                    _json_response(
+                        self,
+                        status,
+                        {
+                            **result,
+                            "state": session.to_state(include_hint=False),
+                        },
+                    )
+                    return
+
+                if path == "/api/engine_reply":
+                    result = session.engine_reply()
                     status = (
                         HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
                     )

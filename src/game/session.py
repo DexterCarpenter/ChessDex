@@ -96,6 +96,8 @@ class PlaySession:
         from_alg: str,
         to_alg: str,
         promotion: str | None = None,
+        *,
+        run_engine: bool = True,
     ) -> dict[str, object]:
         if not self._is_human_turn():
             return {"ok": False, "error": "Not your turn"}
@@ -129,17 +131,33 @@ class PlaySession:
         self.last_move = move
         history = self.board.move_history_san()
         san = history[-1]
-        engine_move = self._run_engine_moves()
         engine_payload = None
-        if engine_move is not None:
-            history = self.board.move_history_san()
-            engine_payload = move_to_api(
-                engine_move, self.board, san=history[-1]
-            )
+        if run_engine:
+            engine_move = self._run_engine_moves()
+            if engine_move is not None:
+                history = self.board.move_history_san()
+                engine_payload = move_to_api(
+                    engine_move, self.board, san=history[-1]
+                )
         return {
             "ok": True,
             "move": move_to_api(move, self.board, san=san),
             "engine_move": engine_payload,
+        }
+
+    def engine_reply(self) -> dict[str, object]:
+        """Play the engine's response after a deferred human move."""
+        if self.board.is_game_over():
+            return {"ok": False, "error": "Game over"}
+        if not self._is_engine_turn():
+            return {"ok": False, "error": "No engine reply pending"}
+        engine_move = self._run_engine_moves()
+        if engine_move is None:
+            return {"ok": False, "error": "No engine move"}
+        history = self.board.move_history_san()
+        return {
+            "ok": True,
+            "engine_move": move_to_api(engine_move, self.board, san=history[-1]),
         }
 
     def undo(self) -> bool:

@@ -25,6 +25,15 @@ def test_human_white_engine_replies(session: PlaySession):
     assert len(session.board.moveLog.moves) >= 2
 
 
+def test_deferred_engine_reply(session: PlaySession):
+    result = session.play_move("e2", "e4", run_engine=False)
+    assert result["ok"] is True
+    assert len(session.board.moveLog.moves) == 1
+    reply = session.engine_reply()
+    assert reply["ok"] is True
+    assert len(session.board.moveLog.moves) >= 2
+
+
 def test_engine_hint_when_enabled(session: PlaySession):
     session.show_engine_hint = True
     hint = session.to_state()["engine_hint"]

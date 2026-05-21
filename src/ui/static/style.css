@@ -22,13 +22,21 @@ body {
   min-height: 100vh;
 }
 
-header {
+.site-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
   padding: 1rem 1.5rem;
   background: #1e1e1e;
   color: #f0f0f0;
 }
 
-header h1 {
+.header-text {
+  min-width: 0;
+}
+
+.site-header h1 {
   margin: 0;
   font-size: 1.4rem;
 }
@@ -37,6 +45,28 @@ header h1 {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
   opacity: 0.75;
+}
+
+.btn-restart {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: #f0f0f0;
+  background: transparent;
+  border: 1px solid rgba(240, 240, 240, 0.35);
+  border-radius: 4px;
+}
+
+.btn-restart:hover:not(:disabled) {
+  background: rgba(63, 124, 172, 0.35);
+  border-color: var(--accent);
+}
+
+.btn-restart:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 main {

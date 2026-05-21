@@ -26,6 +26,7 @@ let state = null;
 let selectedSq = null;
 let pendingPromo = null;
 let autoTimer = null;
+let engineReplyInFlight = false;
 
 function getSessionId() {
   let id = localStorage.getItem(SESSION_KEY);
@@ -125,8 +126,14 @@ function renderStatus() {
   } else {
     statusEl.classList.remove("game-over");
   }
-  if (!state.can_human_move && state.mode !== "engine_engine" && !state.status) {
-    text += " — engine thinking…";
+  if (
+    (engineReplyInFlight ||
+      (!state.can_human_move &&
+        state.mode !== "engine_engine" &&
+        state.is_engine_turn)) &&
+    !state.status
+  ) {
+    text = "Engine thinking…";
   }
   if (state.engine_hint && state.show_engine_hint) {
     text += ` · hint: ${state.engine_hint.san}`;
@@ -241,7 +248,40 @@ async function onSquareClick(alg) {
   await submitMove(selectedSq, alg);
 }
 
+async function requestEngineReply() {
+  if (
+    !state ||
+    state.status ||
+    state.mode === "human_human" ||
+    !state.is_engine_turn
+  ) {
+    if (state?.show_engine_hint) refreshEngineHint();
+    return;
+  }
+  engineReplyInFlight = true;
+  renderStatus();
+  try {
+    const data = await api("/api/engine_reply", {
+      method: "POST",
+      body: "{}",
+    });
+    if (data.state) applyState(data.state, { refreshHint: true });
+    else if (state?.show_engine_hint) refreshEngineHint();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    try {
+      await loadState();
+    } catch {
+      /* keep error visible */
+    }
+  } finally {
+    engineReplyInFlight = false;
+    renderStatus();
+  }
+}
+
 async function submitMove(from, to, promotion) {
+  const stateBeforeMove = state;
   try {
     const body = { from, to };
     if (promotion) body.promotion = promotion;
@@ -261,11 +301,15 @@ async function submitMove(from, to, promotion) {
     pendingPromo = null;
     promoBar.classList.add("hidden");
     selectedSq = null;
-    if (data.state) applyState(data.state, { refreshHint: true });
+    if (data.state) {
+      applyState(data.state);
+      requestEngineReply();
+    }
   } catch (err) {
     statusEl.textContent = err.message;
     selectedSq = null;
-    renderBoard();
+    if (stateBeforeMove) applyState(stateBeforeMove);
+    else renderBoard();
   }
 }
 
@@ -354,6 +398,46 @@ document.getElementById("promo-cancel").addEventListener("click", () => {
   selectedSq = null;
   renderBoard();
 });
+
+async function waitForServiceBack(maxAttempts = 40, intervalMs = 1500) {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    try {
+      const res = await fetch("/api/state");
+      if (res.ok) {
+        location.reload();
+        return;
+      }
+    } catch {
+      /* service still starting */
+    }
+  }
+  statusEl.textContent =
+    "Service may still be restarting — reload the page in a moment.";
+}
+
+async function restartService() {
+  if (
+    !confirm(
+      "Restart the ChessDex service? The game will reset and the page will reload when the server is back."
+    )
+  ) {
+    return;
+  }
+  const btn = document.getElementById("btn-restart");
+  btn.disabled = true;
+  statusEl.textContent = "Restarting service…";
+  try {
+    await api("/api/restart", { method: "POST", body: "{}" });
+  } catch {
+    /* connection often drops as the process exits */
+  }
+  statusEl.textContent = "Waiting for service to come back…";
+  await waitForServiceBack();
+  btn.disabled = false;
+}
+
+document.getElementById("btn-restart").addEventListener("click", restartService);
 
 loadState().catch((err) => {
   statusEl.textContent = `Cannot reach server: ${err.message}`;

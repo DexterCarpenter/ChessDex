@@ -23,3 +23,9 @@ Open the service URL in a browser; play a move vs the engine.
 Point the iframe on [dextercarpenter.github.io](https://dextercarpenter.github.io/chessdex/) at this URL. Update `docs/chessdex.md` if the Render service name differs.
 
 **Note:** Free tier sleeps after inactivity; the first request may take ~30 seconds.
+
+## Restart from the UI
+
+The **Restart service** button in the header calls `POST /api/restart`, which exits the process so Render starts a fresh container. Use this if the engine appears hung.
+
+Optional: set env var `RESTART_TOKEN` on Render to require `X-Restart-Token` on that endpoint (the UI button will not work unless you add matching client support).
