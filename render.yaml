@@ -1,0 +1,15 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Connect this repo in the Render dashboard and apply the blueprint, or create
+# a Web Service manually with Docker runtime and branch main.
+services:
+  - type: web
+    name: chessdex
+    runtime: docker
+    plan: free
+    branch: main
+    healthCheckPath: /api/state
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"

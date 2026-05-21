@@ -1,4 +1,7 @@
 # ChessDex
+
+![Tests](https://github.com/DexterCarpenter/ChessDex/actions/workflows/ci.yml/badge.svg)
+
 My attempt at programming a chess engine from scratch
 
 ## Environment
@@ -18,6 +21,8 @@ python src/play_ui.py
 ```
 
 Open http://127.0.0.1:8765/ — click squares to move, choose mode (human/human, vs engine, engine/engine), toggle **Show engine best move**, undo, etc. Terminal-only play: `python src/play_solo.py`.
+
+Hosted demo (after [deploy](docs/DEPLOY.md)): https://chessdex.onrender.com — also embedded at [dextercarpenter.github.io/chessdex](https://dextercarpenter.github.io/chessdex/).
 
 ## Unit Testing
 ```bash

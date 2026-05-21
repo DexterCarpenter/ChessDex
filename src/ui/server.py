@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -144,7 +145,9 @@ class PlayUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
+def run_server(host: str | None = None, port: int | None = None) -> None:
+    host = host or os.environ.get("HOST", "127.0.0.1")
+    port = port if port is not None else int(os.environ.get("PORT", "8765"))
     server = ThreadingHTTPServer((host, port), PlayUIHandler)
     print(f"ChessDex play UI: http://{host}:{port}/")
     print("Press Ctrl+C to stop.")

@@ -1,23 +1,27 @@
-# For more information, please refer to https://aka.ms/vscode-docker-python
 FROM python:3-slim
 
-# Keeps Python from generating .pyc files in the container
 ENV PYTHONDONTWRITEBYTECODE=1
-
-# Turns off buffering for easier container logging
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/src
+ENV HOST=0.0.0.0
+ENV PORT=8765
 
-# Install pip requirements
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgmp-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
 COPY requirements.txt .
-RUN python -m pip install -r requirements.txt
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r requirements.txt
 
-WORKDIR /src
-COPY . /src
+COPY . .
 
-# Creates a non-root user with an explicit UID and adds permission to access the /src folder
-# For more info, please refer to https://aka.ms/vscode-docker-python-configure-containers
-RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /src
+RUN adduser -u 5678 --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
 USER appuser
 
-# During debugging, this entry point will be overridden. For more information, please refer to https://aka.ms/vscode-docker-python-debug
-CMD ["python", "src\main.py"]
+EXPOSE 8765
+
+CMD ["python", "src/play_ui.py"]
