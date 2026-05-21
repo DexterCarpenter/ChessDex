@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from models.bitboard import (
@@ -136,6 +138,16 @@ def test_get_best_move_random_among_equal_scores(engine: Engine):
         assert move is not None
         seen.add((move.from_square.alg, move.to_square.alg))
     assert len(seen) > 1
+
+
+def test_get_best_move_depth4_under_time_limit(engine: Engine):
+    board = Board()
+    board.setup_starting_position()
+    t0 = time.perf_counter()
+    move = engine.get_best_move(board, 4)
+    elapsed = time.perf_counter() - t0
+    assert move is not None
+    assert elapsed < 5.0
 
 
 def test_get_best_move_returns_none_when_game_over(engine: Engine):
