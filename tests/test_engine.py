@@ -37,6 +37,42 @@ def test_eval_starting_position_is_zero(engine: Engine):
     board = Board()
     board.setup_starting_position()
     assert engine.eval(board) == 0.0
+    assert engine.location_eval(board) == 0.0
+
+
+def test_location_eval_mirrors_black_squares(engine: Engine):
+    board = _empty_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KNIGHT), Sqr("e5"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("e8"))
+    board.whiteTurn = True
+    assert engine.location_eval(board) == 0.0
+
+
+def test_location_eval_prefers_centered_knight(engine: Engine):
+    centered = _empty_board()
+    centered.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+    centered.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    centered.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("e8"))
+    centered.whiteTurn = True
+
+    cornered = _empty_board()
+    cornered.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("a1"))
+    cornered.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    cornered.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("e8"))
+    cornered.whiteTurn = True
+
+    assert engine.location_eval(centered) > engine.location_eval(cornered)
+
+
+def test_material_eval_includes_location(engine: Engine):
+    board = _empty_board()
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KNIGHT), Sqr("e4"))
+    board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("e1"))
+    board.place_piece(ChessPiece(color=Color.BLACK, name=Piece.KING), Sqr("e8"))
+    board.whiteTurn = True
+    assert engine._material_eval(board) == 3.0 + engine.location_eval(board)
 
 
 def test_eval_material_advantage(engine: Engine):
@@ -44,7 +80,8 @@ def test_eval_material_advantage(engine: Engine):
     board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("e1"))
     board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("h1"))
     board.whiteTurn = True
-    assert engine.eval(board) == 9.0
+    assert board.material_score == 9.0
+    assert engine.eval(board) == 9.0 + engine.location_eval(board)
 
 
 def test_eval_checkmate_favors_winner(engine: Engine):
@@ -96,8 +133,13 @@ def test_minimax_finds_winning_capture(engine: Engine):
     board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.QUEEN), Sqr("a1"))
     board.place_piece(ChessPiece(color=Color.WHITE, name=Piece.KING), Sqr("b1"))
     board.whiteTurn = True
-    assert engine.eval(board) == 4.0
-    assert engine.minimax(board, 1) == 9.0
+    assert board.material_score == 4.0
+    assert engine.eval(board) == 4.0 + engine.location_eval(board)
+    winning_capture = _find_legal_move(board, "a1", "a8")
+    board.make_move(winning_capture)
+    expected = 9.0 + engine.location_eval(board)
+    board.undo_move()
+    assert engine.minimax(board, 1) == expected
 
 
 def test_get_best_move_finds_winning_capture(engine: Engine):

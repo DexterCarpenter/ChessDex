@@ -9,6 +9,7 @@ from models.bitboard import (
     Move,
     Piece,
 )
+from models.location_maps import LOCATION_BY_PIECE
 
 _engine_search_lock = threading.Lock()
 
@@ -44,9 +45,39 @@ class Engine:
             [None, None] for _ in range(64)
         ]
 
+    @staticmethod
+    def _mirror_square_idx(idx: int) -> int:
+        """Mirror a square across the rank axis (1↔8); files stay fixed."""
+        file_index = idx % 8
+        rank_index = idx // 8
+        return (7 - rank_index) * 8 + file_index
+
+    @classmethod
+    def _location_map_index(cls, color: Color, square_idx: int) -> int:
+        """Square index into the White-oriented piece map for ``color``."""
+        if color == Color.WHITE:
+            return square_idx
+        return cls._mirror_square_idx(square_idx)
+
+    def location_eval(self, board: Board) -> float:
+        """Location bonus from White's perspective (piece-square modifiers).
+
+        Each piece type has its own modifier grid in ``location_maps.py``.
+        Black uses the White grid with ranks mirrored (not rotated).
+        """
+        score = 0.0
+        for idx, piece in enumerate(board.piece_at):
+            if piece is None:
+                continue
+            map_idx = self._location_map_index(piece.color, idx)
+            modifier = LOCATION_BY_PIECE[piece.name][map_idx]
+            sign = 1.0 if piece.color == Color.WHITE else -1.0
+            score += sign * modifier
+        return score
+
     def _material_eval(self, board: Board) -> float:
-        """Material balance from White's perspective (O(1) incremental)."""
-        return board.material_score
+        """Material plus location-adjusted balance from White's perspective."""
+        return board.material_score + self.location_eval(board)
 
     def _terminal_eval(self, board: Board, color: Color) -> float:
         """Score when color has no legal moves (checkmate or stalemate)."""
@@ -58,7 +89,8 @@ class Engine:
         """Placeholder evaluation from White's perspective (centipawn-scale material).
 
         Positive scores favor White. Checkmate, stalemate, and threefold repetition
-        are handled explicitly; replace material scoring with a fuller eval later.
+        are handled explicitly. Material is adjusted by piece-square location
+        modifiers; mobility weighting can be added here later.
         """
         legal_moves = board.get_all_legal_moves()
         if not legal_moves:
