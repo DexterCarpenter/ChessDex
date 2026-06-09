@@ -4,6 +4,8 @@
 
 My attempt at programming a chess engine from scratch
 
+Play against the engine [on my website](https://dextercarpenter.dev/chessdex/)!
+
 ## Environment
 Enter python environment
 ```bash
@@ -11,7 +13,7 @@ source /workspaces/ChessDex/.venv/bin/activate
 . .venv/bin/activate
 ```
 
-## Play UI (prototype)
+## Play UI
 Start the local web UI (board in the browser, JSON API on port 8765):
 
 ```bash
@@ -21,8 +23,6 @@ python src/play_ui.py
 ```
 
 Open http://127.0.0.1:8765/ — click squares to move, choose mode (human/human, vs engine, engine/engine), toggle **Show engine best move**, undo, etc. Terminal-only play: `python src/play_solo.py`.
-
-Hosted demo (after [deploy](docs/DEPLOY.md)): https://chessdex.onrender.com — also embedded at [dextercarpenter.github.io/chessdex](https://dextercarpenter.github.io/chessdex/).
 
 ## Unit Testing
 ```bash
